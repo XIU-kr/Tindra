@@ -8,10 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`
 
-/// Connect to an SSH server with an OpenSSH private key, run one command,
-/// return its combined output and exit code.
-///
-/// Errors surface as Dart exceptions with the message intact.
+/// Connect, run one command, return its combined output and exit code.
 Future<CommandOutput> runCommandPubkey({
   required String host,
   required int port,
@@ -27,6 +24,54 @@ Future<CommandOutput> runCommandPubkey({
   passphrase: passphrase,
   command: command,
 );
+
+/// Open a long-lived shell over SSH with a PTY. Returns a session id; subscribe
+/// to output by calling `shell_output_stream(session_id)`.
+Future<BigInt> openShellPubkey({
+  required String host,
+  required int port,
+  required String username,
+  required String privateKeyPath,
+  String? passphrase,
+  required int cols,
+  required int rows,
+}) => RustLib.instance.api.crateApiSshOpenShellPubkey(
+  host: host,
+  port: port,
+  username: username,
+  privateKeyPath: privateKeyPath,
+  passphrase: passphrase,
+  cols: cols,
+  rows: rows,
+);
+
+/// Stream of bytes coming out of the remote shell (stdout + stderr merged).
+/// Call this exactly once per session, immediately after `open_shell_pubkey`.
+/// The stream ends when the SSH session closes.
+Stream<Uint8List> shellOutputStream({required BigInt sessionId}) =>
+    RustLib.instance.api.crateApiSshShellOutputStream(sessionId: sessionId);
+
+/// Write input bytes (typed characters, \r, control codes) to a shell.
+Future<void> shellWrite({required BigInt sessionId, required List<int> data}) =>
+    RustLib.instance.api.crateApiSshShellWrite(
+      sessionId: sessionId,
+      data: data,
+    );
+
+/// Tell the remote PTY the terminal was resized.
+Future<void> shellResize({
+  required BigInt sessionId,
+  required int cols,
+  required int rows,
+}) => RustLib.instance.api.crateApiSshShellResize(
+  sessionId: sessionId,
+  cols: cols,
+  rows: rows,
+);
+
+/// Close a shell session. Idempotent.
+Future<void> shellClose({required BigInt sessionId}) =>
+    RustLib.instance.api.crateApiSshShellClose(sessionId: sessionId);
 
 class CommandOutput {
   final int exitCode;

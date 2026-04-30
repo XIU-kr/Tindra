@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tindra desktop — Phase 1.0 SSH demo.
-// Single-shot SSH connect + remote command. No real terminal yet — that lands
-// in Phase 1.1 with PTY + VT parser + grid renderer.
+// Tindra desktop — Phase 1.1 interactive shell.
+// Connect form on the left, live terminal on the right with line-buffered
+// input. No VT/ANSI parsing yet — escape sequences will appear as raw
+// characters until Phase 1.2 wires up `alacritty_terminal`.
+
+import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:tindra_desktop/src/rust/api/ssh.dart';
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
@@ -39,71 +44,139 @@ class TindraApp extends StatelessWidget {
               const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         ),
       ),
-      home: const ConnectScreen(),
+      home: const ShellScreen(),
     );
   }
 }
 
-class ConnectScreen extends StatefulWidget {
-  const ConnectScreen({super.key});
+enum _ConnState { disconnected, connecting, connected }
+
+class ShellScreen extends StatefulWidget {
+  const ShellScreen({super.key});
 
   @override
-  State<ConnectScreen> createState() => _ConnectScreenState();
+  State<ShellScreen> createState() => _ShellScreenState();
 }
 
-class _ConnectScreenState extends State<ConnectScreen> {
+class _ShellScreenState extends State<ShellScreen> {
   final _host = TextEditingController(text: 'localhost');
   final _port = TextEditingController(text: '22');
   final _user = TextEditingController(text: 'XIU');
-  final _keyPath = TextEditingController(
-      text: r'C:\Users\XIU\.ssh\id_ed25519');
+  final _keyPath =
+      TextEditingController(text: r'C:\Users\XIU\.ssh\id_ed25519');
   final _passphrase = TextEditingController();
-  final _command = TextEditingController(text: 'hostname & whoami & cd');
+  final _input = TextEditingController();
+  final _scroll = ScrollController();
+  final _inputFocus = FocusNode();
 
-  bool _running = false;
-  CommandOutput? _result;
+  _ConnState _state = _ConnState.disconnected;
+  BigInt? _sessionId;
+  StreamSubscription<Uint8List>? _outputSub;
+  String _output = '';
   String? _error;
-  Duration? _elapsed;
 
-  Future<void> _run() async {
+  // UTF-8 streaming decoder (handles bytes split across chunks).
+  final _decoder = const Utf8Decoder(allowMalformed: true);
+
+  Future<void> _connect() async {
     setState(() {
-      _running = true;
-      _result = null;
+      _state = _ConnState.connecting;
+      _output = '';
       _error = null;
-      _elapsed = null;
     });
-    final stopwatch = Stopwatch()..start();
     try {
-      final out = await runCommandPubkey(
+      final id = await openShellPubkey(
         host: _host.text.trim(),
         port: int.parse(_port.text.trim()),
         username: _user.text.trim(),
         privateKeyPath: _keyPath.text.trim(),
-        passphrase:
-            _passphrase.text.isEmpty ? null : _passphrase.text,
-        command: _command.text,
+        passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
+        cols: 120,
+        rows: 32,
       );
-      stopwatch.stop();
-      setState(() {
-        _result = out;
-        _elapsed = stopwatch.elapsed;
-      });
+      _sessionId = id;
+      _outputSub = shellOutputStream(sessionId: id).listen(
+        (bytes) {
+          // Decode each chunk and append. Auto-scroll on next frame.
+          final text = _decoder.convert(bytes);
+          setState(() => _output += text);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scroll.hasClients) {
+              _scroll.animateTo(
+                _scroll.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 50),
+                curve: Curves.easeOut,
+              );
+            }
+          });
+        },
+        onError: (e) {
+          setState(() {
+            _error = e.toString();
+            _state = _ConnState.disconnected;
+          });
+        },
+        onDone: () {
+          setState(() => _state = _ConnState.disconnected);
+        },
+      );
+      setState(() => _state = _ConnState.connected);
+      // Move keyboard focus into the terminal input.
+      _inputFocus.requestFocus();
     } catch (e) {
-      stopwatch.stop();
       setState(() {
         _error = e.toString();
-        _elapsed = stopwatch.elapsed;
+        _state = _ConnState.disconnected;
       });
-    } finally {
-      setState(() => _running = false);
     }
+  }
+
+  Future<void> _disconnect() async {
+    final id = _sessionId;
+    if (id == null) return;
+    await _outputSub?.cancel();
+    _outputSub = null;
+    await shellClose(sessionId: id);
+    setState(() {
+      _sessionId = null;
+      _state = _ConnState.disconnected;
+    });
+  }
+
+  Future<void> _sendLine() async {
+    final id = _sessionId;
+    if (id == null) return;
+    final line = _input.text;
+    _input.clear();
+    final bytes = Uint8List.fromList(utf8.encode('$line\r'));
+    try {
+      await shellWrite(sessionId: id, data: bytes);
+    } catch (e) {
+      setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _sendCtrl(String key) async {
+    final id = _sessionId;
+    if (id == null) return;
+    // Ctrl+key → ASCII control code (e.g. C=3, D=4, L=12, Z=26).
+    final upper = key.toUpperCase().codeUnitAt(0);
+    if (upper < 0x40 || upper > 0x5F) return;
+    final code = upper - 0x40;
+    await shellWrite(sessionId: id, data: Uint8List.fromList([code]));
   }
 
   @override
   void dispose() {
-    for (final c in [_host, _port, _user, _keyPath, _passphrase, _command]) {
+    _outputSub?.cancel();
+    if (_sessionId != null) {
+      shellClose(sessionId: _sessionId!);
+    }
+    for (final c in [_host, _port, _user, _keyPath, _passphrase, _input]) {
       c.dispose();
     }
+    _scroll.dispose();
+    _inputFocus.dispose();
     super.dispose();
   }
 
@@ -111,72 +184,205 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tindra · Phase 1.0 — SSH exec'),
+        title: Text(_state == _ConnState.connected
+            ? 'Tindra · ${_user.text}@${_host.text}'
+            : 'Tindra · Phase 1.1 — interactive shell'),
         backgroundColor: const Color(0xFF161A22),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Left pane: form
-            SizedBox(
-              width: 380,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _Field(label: 'Host', controller: _host),
-                  Row(children: [
-                    Expanded(
-                      child: _Field(label: 'User', controller: _user),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 90,
-                      child: _Field(label: 'Port', controller: _port),
-                    ),
-                  ]),
-                  _Field(label: 'Private key path', controller: _keyPath),
-                  _Field(
-                    label: 'Passphrase (optional)',
-                    controller: _passphrase,
-                    obscure: true,
-                  ),
-                  _Field(
-                    label: 'Command',
-                    controller: _command,
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 8),
-                  FilledButton.icon(
-                    onPressed: _running ? null : _run,
-                    icon: _running
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.play_arrow),
-                    label: Text(_running ? 'Connecting…' : 'Run'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const VerticalDivider(width: 32),
-            // Right pane: output
-            Expanded(child: _OutputPane(
-              result: _result,
-              error: _error,
-              elapsed: _elapsed,
-            )),
+            SizedBox(width: 320, child: _connectionPanel()),
+            const SizedBox(width: 12),
+            Expanded(child: _terminalPanel()),
           ],
         ),
       ),
     );
   }
+
+  Widget _connectionPanel() {
+    final disabled = _state != _ConnState.disconnected;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Field(label: 'Host', controller: _host, enabled: !disabled),
+        Row(children: [
+          Expanded(
+              child: _Field(
+                  label: 'User', controller: _user, enabled: !disabled)),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 90,
+            child:
+                _Field(label: 'Port', controller: _port, enabled: !disabled),
+          ),
+        ]),
+        _Field(
+          label: 'Private key path',
+          controller: _keyPath,
+          enabled: !disabled,
+        ),
+        _Field(
+          label: 'Passphrase (optional)',
+          controller: _passphrase,
+          enabled: !disabled,
+          obscure: true,
+        ),
+        const SizedBox(height: 8),
+        if (_state == _ConnState.disconnected)
+          FilledButton.icon(
+            onPressed: _connect,
+            icon: const Icon(Icons.link),
+            label: const Text('Connect'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          )
+        else if (_state == _ConnState.connecting)
+          FilledButton.icon(
+            onPressed: null,
+            icon: const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            label: const Text('Connecting…'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: _disconnect,
+            icon: const Icon(Icons.link_off),
+            label: const Text('Disconnect'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8B2C2C),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        const SizedBox(height: 12),
+        if (_error != null)
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF2A1417),
+              border: Border.all(color: const Color(0xFFFF6E6E)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            padding: const EdgeInsets.all(10),
+            child: Text(
+              _error!,
+              style: const TextStyle(
+                color: Color(0xFFFFB4B4),
+                fontFamily: 'Consolas',
+                fontSize: 12,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _terminalPanel() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0C12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Scrollbar(
+                controller: _scroll,
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  controller: _scroll,
+                  child: SelectableText(
+                    _output.isEmpty && _state != _ConnState.connected
+                        ? '(not connected)'
+                        : _output,
+                    style: const TextStyle(
+                      fontFamily: 'Consolas',
+                      fontSize: 13,
+                      height: 1.35,
+                      color: Color(0xFFE3E9F1),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(
+                top: BorderSide(color: Color(0xFF1F2937)),
+              ),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(children: [
+              const Text(
+                '\$ ',
+                style: TextStyle(
+                  color: Color(0xFF7AC0FF),
+                  fontFamily: 'Consolas',
+                  fontSize: 13,
+                ),
+              ),
+              Expanded(
+                child: Shortcuts(
+                  shortcuts: <ShortcutActivator, Intent>{
+                    LogicalKeySet(LogicalKeyboardKey.control,
+                        LogicalKeyboardKey.keyC): const _CtrlIntent('C'),
+                    LogicalKeySet(LogicalKeyboardKey.control,
+                        LogicalKeyboardKey.keyD): const _CtrlIntent('D'),
+                    LogicalKeySet(LogicalKeyboardKey.control,
+                        LogicalKeyboardKey.keyL): const _CtrlIntent('L'),
+                  },
+                  child: Actions(
+                    actions: <Type, Action<Intent>>{
+                      _CtrlIntent: CallbackAction<_CtrlIntent>(
+                        onInvoke: (intent) {
+                          _sendCtrl(intent.key);
+                          return null;
+                        },
+                      ),
+                    },
+                    child: TextField(
+                      controller: _input,
+                      focusNode: _inputFocus,
+                      enabled: _state == _ConnState.connected,
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        filled: false,
+                        isDense: true,
+                        hintText: 'type a command, Enter to send · Ctrl+C/D/L',
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      style: const TextStyle(
+                        fontFamily: 'Consolas',
+                        fontSize: 13,
+                        color: Color(0xFFE3E9F1),
+                      ),
+                      onSubmitted: (_) => _sendLine(),
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CtrlIntent extends Intent {
+  const _CtrlIntent(this.key);
+  final String key;
 }
 
 class _Field extends StatelessWidget {
@@ -184,12 +390,12 @@ class _Field extends StatelessWidget {
     required this.label,
     required this.controller,
     this.obscure = false,
-    this.maxLines = 1,
+    this.enabled = true,
   });
   final String label;
   final TextEditingController controller;
   final bool obscure;
-  final int maxLines;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -211,142 +417,8 @@ class _Field extends StatelessWidget {
           TextField(
             controller: controller,
             obscureText: obscure,
-            maxLines: maxLines,
+            enabled: enabled,
             style: const TextStyle(fontFamily: 'Consolas', fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OutputPane extends StatelessWidget {
-  const _OutputPane({
-    required this.result,
-    required this.error,
-    required this.elapsed,
-  });
-  final CommandOutput? result;
-  final String? error;
-  final Duration? elapsed;
-
-  @override
-  Widget build(BuildContext context) {
-    if (error != null) {
-      return _Block(
-        title: 'Error',
-        titleColor: const Color(0xFFFF6E6E),
-        body: error!,
-        elapsed: elapsed,
-      );
-    }
-    if (result == null) {
-      return Center(
-        child: Text(
-          'Fill the form and click Run.\n'
-          'A successful result fills stdout · stderr · exit code panes here.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.grey.shade500),
-        ),
-      );
-    }
-    final r = result!;
-    final exitColor = r.exitCode == 0
-        ? const Color(0xFF4ADE80)
-        : const Color(0xFFFF6E6E);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(children: [
-            const Text('exit code: ',
-                style: TextStyle(color: Color(0xFF8AA0B5))),
-            Text('${r.exitCode}',
-                style: TextStyle(
-                  color: exitColor,
-                  fontFamily: 'Consolas',
-                  fontWeight: FontWeight.bold,
-                )),
-            const SizedBox(width: 16),
-            if (elapsed != null)
-              Text(
-                '${elapsed!.inMilliseconds} ms',
-                style: const TextStyle(
-                  color: Color(0xFF8AA0B5),
-                  fontFamily: 'Consolas',
-                ),
-              ),
-          ]),
-        ),
-        if (r.stdout.isNotEmpty)
-          Expanded(
-            child: _Block(
-              title: 'stdout',
-              titleColor: const Color(0xFF7AC0FF),
-              body: r.stdout,
-            ),
-          ),
-        if (r.stderr.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Expanded(
-            child: _Block(
-              title: 'stderr',
-              titleColor: const Color(0xFFFFB86C),
-              body: r.stderr,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _Block extends StatelessWidget {
-  const _Block({
-    required this.title,
-    required this.titleColor,
-    required this.body,
-    this.elapsed,
-  });
-  final String title;
-  final Color titleColor;
-  final String body;
-  final Duration? elapsed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF161A22),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFF1F2937)),
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: titleColor,
-              fontFamily: 'Consolas',
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Expanded(
-            child: SingleChildScrollView(
-              child: SelectableText(
-                body,
-                style: const TextStyle(
-                  fontFamily: 'Consolas',
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-              ),
-            ),
           ),
         ],
       ),
