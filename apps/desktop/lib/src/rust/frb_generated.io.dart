@@ -34,10 +34,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  Cell dco_decode_cell(dynamic raw);
+
+  @protected
+  Color dco_decode_color(dynamic raw);
+
+  @protected
   CommandOutput dco_decode_command_output(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
+
+  @protected
+  List<Cell> dco_decode_list_cell(dynamic raw);
 
   @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
@@ -81,10 +90,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  Cell sse_decode_cell(SseDeserializer deserializer);
+
+  @protected
+  Color sse_decode_color(SseDeserializer deserializer);
+
+  @protected
   CommandOutput sse_decode_command_output(SseDeserializer deserializer);
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
+
+  @protected
+  List<Cell> sse_decode_list_cell(SseDeserializer deserializer);
 
   @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
@@ -132,10 +150,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_cell(Cell self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_color(Color self, SseSerializer serializer);
+
+  @protected
   void sse_encode_command_output(CommandOutput self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_cell(List<Cell> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);

@@ -475,6 +475,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Cell dco_decode_cell(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return Cell(
+      ch: dco_decode_String(arr[0]),
+      fg: dco_decode_color(arr[1]),
+      bg: dco_decode_color(arr[2]),
+      attrs: dco_decode_u_8(arr[3]),
+    );
+  }
+
+  @protected
+  Color dco_decode_color(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return Color(
+      default_: dco_decode_bool(arr[0]),
+      r: dco_decode_u_8(arr[1]),
+      g: dco_decode_u_8(arr[2]),
+      b: dco_decode_u_8(arr[3]),
+    );
+  }
+
+  @protected
   CommandOutput dco_decode_command_output(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -491,6 +519,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int dco_decode_i_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  List<Cell> dco_decode_list_cell(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_cell).toList();
   }
 
   @protected
@@ -515,15 +549,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TerminalSnapshot dco_decode_terminal_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return TerminalSnapshot(
       rows: dco_decode_u_32(arr[0]),
       cols: dco_decode_u_32(arr[1]),
       text: dco_decode_String(arr[2]),
-      cursorRow: dco_decode_u_32(arr[3]),
-      cursorCol: dco_decode_u_32(arr[4]),
-      cursorVisible: dco_decode_bool(arr[5]),
+      cells: dco_decode_list_cell(arr[3]),
+      cursorRow: dco_decode_u_32(arr[4]),
+      cursorCol: dco_decode_u_32(arr[5]),
+      cursorVisible: dco_decode_bool(arr[6]),
     );
   }
 
@@ -586,6 +621,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Cell sse_decode_cell(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_ch = sse_decode_String(deserializer);
+    var var_fg = sse_decode_color(deserializer);
+    var var_bg = sse_decode_color(deserializer);
+    var var_attrs = sse_decode_u_8(deserializer);
+    return Cell(ch: var_ch, fg: var_fg, bg: var_bg, attrs: var_attrs);
+  }
+
+  @protected
+  Color sse_decode_color(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_default_ = sse_decode_bool(deserializer);
+    var var_r = sse_decode_u_8(deserializer);
+    var var_g = sse_decode_u_8(deserializer);
+    var var_b = sse_decode_u_8(deserializer);
+    return Color(default_: var_default_, r: var_r, g: var_g, b: var_b);
+  }
+
+  @protected
   CommandOutput sse_decode_command_output(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_exitCode = sse_decode_i_32(deserializer);
@@ -602,6 +657,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
+  }
+
+  @protected
+  List<Cell> sse_decode_list_cell(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Cell>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_cell(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -635,6 +702,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_rows = sse_decode_u_32(deserializer);
     var var_cols = sse_decode_u_32(deserializer);
     var var_text = sse_decode_String(deserializer);
+    var var_cells = sse_decode_list_cell(deserializer);
     var var_cursorRow = sse_decode_u_32(deserializer);
     var var_cursorCol = sse_decode_u_32(deserializer);
     var var_cursorVisible = sse_decode_bool(deserializer);
@@ -642,6 +710,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       rows: var_rows,
       cols: var_cols,
       text: var_text,
+      cells: var_cells,
       cursorRow: var_cursorRow,
       cursorCol: var_cursorCol,
       cursorVisible: var_cursorVisible,
@@ -716,6 +785,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_cell(Cell self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.ch, serializer);
+    sse_encode_color(self.fg, serializer);
+    sse_encode_color(self.bg, serializer);
+    sse_encode_u_8(self.attrs, serializer);
+  }
+
+  @protected
+  void sse_encode_color(Color self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.default_, serializer);
+    sse_encode_u_8(self.r, serializer);
+    sse_encode_u_8(self.g, serializer);
+    sse_encode_u_8(self.b, serializer);
+  }
+
+  @protected
   void sse_encode_command_output(CommandOutput self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.exitCode, serializer);
@@ -727,6 +814,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
+  }
+
+  @protected
+  void sse_encode_list_cell(List<Cell> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_cell(item, serializer);
+    }
   }
 
   @protected
@@ -770,6 +866,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.rows, serializer);
     sse_encode_u_32(self.cols, serializer);
     sse_encode_String(self.text, serializer);
+    sse_encode_list_cell(self.cells, serializer);
     sse_encode_u_32(self.cursorRow, serializer);
     sse_encode_u_32(self.cursorCol, serializer);
     sse_encode_bool(self.cursorVisible, serializer);

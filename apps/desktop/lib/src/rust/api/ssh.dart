@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `meta_registry`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `SessionMeta`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 Future<CommandOutput> runCommandPubkey({
   required String host,
@@ -45,8 +45,8 @@ Future<BigInt> openShellPubkey({
 );
 
 /// Stream of terminal snapshots. Bytes from the SSH session are fed into a
-/// per-call `vt100::Parser`, and after each chunk a fresh `TerminalSnapshot`
-/// is pushed to the sink. Call this exactly once per session.
+/// per-session vt100::Parser; after each chunk a fresh `TerminalSnapshot` is
+/// pushed. Call this exactly once per session.
 Stream<TerminalSnapshot> shellOutputStream({required BigInt sessionId}) =>
     RustLib.instance.api.crateApiSshShellOutputStream(sessionId: sessionId);
 
@@ -56,6 +56,8 @@ Future<void> shellWrite({required BigInt sessionId, required List<int> data}) =>
       data: data,
     );
 
+/// Resize the remote PTY *and* the local vt100 parser so the next snapshot
+/// reflects the new geometry.
 Future<void> shellResize({
   required BigInt sessionId,
   required int cols,
@@ -68,6 +70,65 @@ Future<void> shellResize({
 
 Future<void> shellClose({required BigInt sessionId}) =>
     RustLib.instance.api.crateApiSshShellClose(sessionId: sessionId);
+
+/// One cell in the terminal grid.
+class Cell {
+  final String ch;
+  final Color fg;
+  final Color bg;
+
+  /// Bitfield: 1=bold, 2=italic, 4=underline, 8=inverse, 16=dim.
+  final int attrs;
+
+  const Cell({
+    required this.ch,
+    required this.fg,
+    required this.bg,
+    required this.attrs,
+  });
+
+  @override
+  int get hashCode => ch.hashCode ^ fg.hashCode ^ bg.hashCode ^ attrs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Cell &&
+          runtimeType == other.runtimeType &&
+          ch == other.ch &&
+          fg == other.fg &&
+          bg == other.bg &&
+          attrs == other.attrs;
+}
+
+/// 24-bit color or default. Mirrors tindra_core::term::ColorVal so frb codegen
+/// has a local Dart type.
+class Color {
+  final bool default_;
+  final int r;
+  final int g;
+  final int b;
+
+  const Color({
+    required this.default_,
+    required this.r,
+    required this.g,
+    required this.b,
+  });
+
+  @override
+  int get hashCode => default_.hashCode ^ r.hashCode ^ g.hashCode ^ b.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Color &&
+          runtimeType == other.runtimeType &&
+          default_ == other.default_ &&
+          r == other.r &&
+          g == other.g &&
+          b == other.b;
+}
 
 class CommandOutput {
   final int exitCode;
@@ -93,11 +154,16 @@ class CommandOutput {
           stderr == other.stderr;
 }
 
-/// One frame of terminal state, ready to be rendered as monospace text.
+/// One frame of terminal state.
 class TerminalSnapshot {
   final int rows;
   final int cols;
+
+  /// Plain-text mirror with `\n` between rows (for selection/search).
   final String text;
+
+  /// Per-cell grid, row-major, length = rows * cols.
+  final List<Cell> cells;
   final int cursorRow;
   final int cursorCol;
   final bool cursorVisible;
@@ -106,6 +172,7 @@ class TerminalSnapshot {
     required this.rows,
     required this.cols,
     required this.text,
+    required this.cells,
     required this.cursorRow,
     required this.cursorCol,
     required this.cursorVisible,
@@ -116,6 +183,7 @@ class TerminalSnapshot {
       rows.hashCode ^
       cols.hashCode ^
       text.hashCode ^
+      cells.hashCode ^
       cursorRow.hashCode ^
       cursorCol.hashCode ^
       cursorVisible.hashCode;
@@ -128,6 +196,7 @@ class TerminalSnapshot {
           rows == other.rows &&
           cols == other.cols &&
           text == other.text &&
+          cells == other.cells &&
           cursorRow == other.cursorRow &&
           cursorCol == other.cursorCol &&
           cursorVisible == other.cursorVisible;
