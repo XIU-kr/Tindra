@@ -4,3 +4,4 @@
 // engine) so this layer stays a thin, allocation-cheap shim.
 
 pub mod hello;
+pub mod ssh;

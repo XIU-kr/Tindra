@@ -16,7 +16,4 @@ async-trait.workspace = true
 thiserror.workspace  = true
 tracing.workspace    = true
 zeroize.workspace    = true
-
-# To be enabled when SSH transport is wired up:
-# russh      = { workspace = true }
-# russh-keys = { workspace = true }
+russh.workspace      = true
