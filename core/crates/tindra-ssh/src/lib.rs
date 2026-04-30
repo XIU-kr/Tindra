@@ -349,6 +349,69 @@ pub async fn shell_close(session_id: u64) -> Result<(), SshError> {
 }
 
 // ---------------------------------------------------------------------------
+// Reusable connect+auth helpers (used by tindra-ssh and tindra-sftp)
+// ---------------------------------------------------------------------------
+
+/// Returns an authenticated SSH session, optionally going through a jump
+/// host. `jump_handle` (the second tuple element) must be kept alive for
+/// the session's lifetime when present — dropping it tears down the proxy.
+pub async fn open_session_pubkey(
+    host: String,
+    port: u16,
+    username: String,
+    private_key_path: PathBuf,
+    passphrase: Option<String>,
+    jump: Option<JumpParams>,
+) -> Result<(Handle<TofuHandler>, Option<Handle<TofuHandler>>), SshError> {
+    let key_pair = russh::keys::load_secret_key(&private_key_path, passphrase.as_deref())?;
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host, port, config).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            None,
+        ),
+    };
+    if !handle.authenticate_publickey(username, Arc::new(key_pair)).await? {
+        return Err(SshError::AuthFailed);
+    }
+    Ok((handle, jump_handle))
+}
+
+pub async fn open_session_agent(
+    host: String,
+    port: u16,
+    username: String,
+    jump: Option<JumpParams>,
+) -> Result<(Handle<TofuHandler>, Option<Handle<TofuHandler>>), SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host, port, config).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            None,
+        ),
+    };
+    authenticate_via_agent(&mut handle, &username).await?;
+    Ok((handle, jump_handle))
+}
+
+// Re-export for downstream crates that want to plug into the same handler.
+pub type SshHandle = Handle<TofuHandler>;
+
+// ---------------------------------------------------------------------------
 // Phase 4.0 — agent-based auth
 // ---------------------------------------------------------------------------
 
@@ -454,7 +517,7 @@ async fn authenticate_via_agent(
 
 /// Trust-on-first-use handler. Phase 1 hardening will replace this with a
 /// known_hosts-backed implementation that prompts on fingerprint changes.
-struct TofuHandler;
+pub struct TofuHandler;
 
 #[async_trait]
 impl client::Handler for TofuHandler {

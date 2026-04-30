@@ -141,6 +141,13 @@ pub struct JumpHost {
 }
 
 fn jump_to_core(j: JumpHost) -> Option<tindra_core::ssh::JumpParams> {
+    jump_to_core_pub(j)
+}
+
+/// Re-exported so other FFI modules (e.g. sftp.rs) can convert without
+/// duplicating the empty-host check. `pub(crate)` so frb codegen doesn't
+/// surface JumpParams to Dart — it stays an internal helper.
+pub(crate) fn jump_to_core_pub(j: JumpHost) -> Option<tindra_core::ssh::JumpParams> {
     if j.host.is_empty() {
         None
     } else {

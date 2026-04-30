@@ -10,8 +10,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:io';
+
 import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/settings.dart' as rust;
+import 'package:tindra_desktop/src/rust/api/sftp.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/ssh.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
@@ -574,6 +577,14 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 
+  Future<void> _openSftpDialog(rust.Profile profile) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _SftpDialog(profile: profile),
+    );
+  }
+
   Future<void> _openSettingsDialog() async {
     final result = await showDialog<rust.Settings>(
       context: context,
@@ -792,6 +803,12 @@ class _ShellScreenState extends State<ShellScreen> {
             onPressed: () => _deleteProfile(p),
           ),
         ]),
+        const SizedBox(height: 6),
+        OutlinedButton.icon(
+          onPressed: () => _openSftpDialog(p),
+          icon: const Icon(Icons.folder_shared, size: 16),
+          label: const Text('SFTP browser'),
+        ),
       ],
     );
   }
@@ -1382,6 +1399,413 @@ class _ProfileDialogState extends State<_ProfileDialog> {
 
 extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
+}
+
+// ---------------------- Phase 6 — SFTP browser ----------------------
+
+class _SftpDialog extends StatefulWidget {
+  const _SftpDialog({required this.profile});
+  final rust.Profile profile;
+
+  @override
+  State<_SftpDialog> createState() => _SftpDialogState();
+}
+
+class _SftpDialogState extends State<_SftpDialog> {
+  BigInt? _sessionId;
+  String? _error;
+  bool _busy = false;
+
+  String _localPath =
+      Platform.environment['USERPROFILE'] ?? Directory.current.path;
+  String _remotePath = '';
+  List<FileSystemEntity> _localEntries = [];
+  List<rust.SftpEntry> _remoteEntries = [];
+  FileSystemEntity? _selectedLocal;
+  rust.SftpEntry? _selectedRemote;
+
+  @override
+  void initState() {
+    super.initState();
+    _connect();
+    _refreshLocal();
+  }
+
+  Future<void> _connect() async {
+    final p = widget.profile;
+    setState(() => _busy = true);
+    try {
+      final jump = rust.JumpHost(
+        host: p.jumpHost,
+        port: p.jumpPort == 0 ? 22 : p.jumpPort,
+        username: p.jumpUsername,
+        privateKeyPath: p.jumpPrivateKeyPath,
+        passphrase: null,
+      );
+      final id = p.authMethod == 'agent'
+          ? await rust.openSftpAgent(
+              host: p.host,
+              port: p.port,
+              username: p.username,
+              jump: jump,
+            )
+          : await rust.openSftpPubkey(
+              host: p.host,
+              port: p.port,
+              username: p.username,
+              privateKeyPath: p.privateKeyPath,
+              passphrase: null,
+              jump: jump,
+            );
+      _sessionId = id;
+      _remotePath = await rust.sftpHome(sessionId: id);
+      await _refreshRemote();
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _refreshLocal() {
+    try {
+      final dir = Directory(_localPath);
+      final entries = dir.listSync()
+        ..sort((a, b) {
+          final ad = a is Directory;
+          final bd = b is Directory;
+          if (ad != bd) return ad ? -1 : 1;
+          return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+        });
+      setState(() {
+        _localEntries = entries;
+        _selectedLocal = null;
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _refreshRemote() async {
+    final id = _sessionId;
+    if (id == null) return;
+    try {
+      final list = await rust.sftpList(sessionId: id, path: _remotePath);
+      setState(() {
+        _remoteEntries = list;
+        _selectedRemote = null;
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
+    }
+  }
+
+  void _navigateLocal(FileSystemEntity entity) {
+    if (entity is Directory) {
+      _localPath = entity.path;
+      _refreshLocal();
+    } else {
+      setState(() => _selectedLocal = entity);
+    }
+  }
+
+  Future<void> _navigateRemote(rust.SftpEntry entry) async {
+    if (entry.isDir) {
+      _remotePath = _joinRemote(_remotePath, entry.name);
+      await _refreshRemote();
+    } else {
+      setState(() => _selectedRemote = entry);
+    }
+  }
+
+  String _joinRemote(String base, String name) {
+    if (base.endsWith('/')) return '$base$name';
+    return '$base/$name';
+  }
+
+  Future<void> _localUp() async {
+    final parent = Directory(_localPath).parent.path;
+    if (parent != _localPath) {
+      _localPath = parent;
+      _refreshLocal();
+    }
+  }
+
+  Future<void> _remoteUp() async {
+    final idx = _remotePath.lastIndexOf('/');
+    if (idx > 0) {
+      _remotePath = _remotePath.substring(0, idx);
+      await _refreshRemote();
+    } else if (idx == 0 && _remotePath.length > 1) {
+      _remotePath = '/';
+      await _refreshRemote();
+    }
+  }
+
+  Future<void> _doUpload() async {
+    final id = _sessionId;
+    final local = _selectedLocal;
+    if (id == null || local is! File) return;
+    setState(() => _busy = true);
+    try {
+      final fileName = local.uri.pathSegments.last;
+      await rust.sftpUpload(
+        sessionId: id,
+        localPath: local.path,
+        remotePath: _joinRemote(_remotePath, fileName),
+      );
+      await _refreshRemote();
+      _flash('Uploaded $fileName');
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _doDownload() async {
+    final id = _sessionId;
+    final remote = _selectedRemote;
+    if (id == null || remote == null || remote.isDir) return;
+    setState(() => _busy = true);
+    try {
+      final localTarget = '$_localPath${Platform.pathSeparator}${remote.name}';
+      await rust.sftpDownload(
+        sessionId: id,
+        remotePath: _joinRemote(_remotePath, remote.name),
+        localPath: localTarget,
+      );
+      _refreshLocal();
+      _flash('Downloaded ${remote.name}');
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _flash(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  @override
+  void dispose() {
+    final id = _sessionId;
+    _sessionId = null;
+    if (id != null) {
+      // fire and forget
+      rust.sftpClose(sessionId: id);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(40),
+      child: SizedBox(
+        width: 1100,
+        height: 700,
+        child: Column(
+          children: [
+            AppBar(
+              title: Text('SFTP — ${widget.profile.name}'),
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              automaticallyImplyLeading: false,
+              actions: [
+                if (_busy)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            if (_error != null)
+              Container(
+                color: const Color(0xFF2A1417),
+                padding: const EdgeInsets.all(8),
+                width: double.infinity,
+                child: Row(children: [
+                  Expanded(
+                    child: Text(_error!,
+                        style: const TextStyle(color: Color(0xFFFFB4B4))),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 14),
+                    onPressed: () => setState(() => _error = null),
+                  ),
+                ]),
+              ),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(child: _localPanel()),
+                  _transferControls(),
+                  Expanded(child: _remotePanel()),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _transferControls() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton.filled(
+            tooltip: 'Upload (local → remote)',
+            onPressed:
+                (_selectedLocal is File && _sessionId != null && !_busy)
+                    ? _doUpload
+                    : null,
+            icon: const Icon(Icons.arrow_forward),
+          ),
+          const SizedBox(height: 12),
+          IconButton.filled(
+            tooltip: 'Download (remote → local)',
+            onPressed: (_selectedRemote != null &&
+                    !(_selectedRemote!.isDir) &&
+                    _sessionId != null &&
+                    !_busy)
+                ? _doDownload
+                : null,
+            icon: const Icon(Icons.arrow_back),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _localPanel() {
+    return _panel(
+      title: 'Local',
+      path: _localPath,
+      onUp: _localUp,
+      onRefresh: _refreshLocal,
+      child: ListView.builder(
+        itemCount: _localEntries.length,
+        itemBuilder: (_, i) {
+          final e = _localEntries[i];
+          final name = e.uri.pathSegments.where((s) => s.isNotEmpty).last;
+          final isDir = e is Directory;
+          final selected = identical(e, _selectedLocal);
+          return ListTile(
+            dense: true,
+            selected: selected,
+            leading: Icon(
+              isDir ? Icons.folder : Icons.insert_drive_file_outlined,
+              size: 18,
+            ),
+            title: Text(name, style: const TextStyle(fontSize: 13)),
+            onTap: () => _navigateLocal(e),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _remotePanel() {
+    return _panel(
+      title: 'Remote',
+      path: _remotePath.isEmpty ? '(connecting…)' : _remotePath,
+      onUp: _sessionId == null ? null : _remoteUp,
+      onRefresh: _sessionId == null ? null : _refreshRemote,
+      child: _sessionId == null
+          ? const Center(child: Text('Not connected'))
+          : ListView.builder(
+              itemCount: _remoteEntries.length,
+              itemBuilder: (_, i) {
+                final e = _remoteEntries[i];
+                final selected = identical(e, _selectedRemote);
+                return ListTile(
+                  dense: true,
+                  selected: selected,
+                  leading: Icon(
+                    e.isDir
+                        ? Icons.folder
+                        : (e.isSymlink
+                            ? Icons.link
+                            : Icons.insert_drive_file_outlined),
+                    size: 18,
+                  ),
+                  title: Text(e.name, style: const TextStyle(fontSize: 13)),
+                  trailing: e.isDir
+                      ? null
+                      : Text('${e.size}',
+                          style: const TextStyle(fontSize: 11)),
+                  onTap: () => _navigateRemote(e),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _panel({
+    required String title,
+    required String path,
+    required Widget child,
+    VoidCallback? onUp,
+    VoidCallback? onRefresh,
+  }) {
+    return Container(
+      margin: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFF1F2937)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 4, 0),
+            child: Row(children: [
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF8AA0B5))),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.arrow_upward, size: 16),
+                tooltip: 'Up',
+                onPressed: onUp,
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 16),
+                tooltip: 'Refresh',
+                onPressed: onRefresh,
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(path,
+                style: const TextStyle(
+                    fontFamily: 'Consolas', fontSize: 11),
+                overflow: TextOverflow.ellipsis),
+          ),
+          const Divider(height: 12),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
 }
 
 // ---------------------- Phase 7 — shortcuts and settings ----------------------

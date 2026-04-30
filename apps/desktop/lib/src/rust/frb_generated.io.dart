@@ -6,6 +6,7 @@
 import 'api/hello.dart';
 import 'api/profiles.dart';
 import 'api/settings.dart';
+import 'api/sftp.dart';
 import 'api/ssh.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -75,6 +76,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Profile> dco_decode_list_profile(dynamic raw);
 
   @protected
+  List<SftpEntry> dco_decode_list_sftp_entry(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
@@ -82,6 +86,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Settings dco_decode_settings(dynamic raw);
+
+  @protected
+  SftpEntry dco_decode_sftp_entry(dynamic raw);
 
   @protected
   TerminalSnapshot dco_decode_terminal_snapshot(dynamic raw);
@@ -155,6 +162,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Profile> sse_decode_list_profile(SseDeserializer deserializer);
 
   @protected
+  List<SftpEntry> sse_decode_list_sftp_entry(SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
@@ -162,6 +172,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Settings sse_decode_settings(SseDeserializer deserializer);
+
+  @protected
+  SftpEntry sse_decode_sftp_entry(SseDeserializer deserializer);
 
   @protected
   TerminalSnapshot sse_decode_terminal_snapshot(SseDeserializer deserializer);
@@ -245,6 +258,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_profile(List<Profile> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_sftp_entry(
+    List<SftpEntry> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
@@ -252,6 +271,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_settings(Settings self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_sftp_entry(SftpEntry self, SseSerializer serializer);
 
   @protected
   void sse_encode_terminal_snapshot(

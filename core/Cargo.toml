@@ -46,7 +46,7 @@ toml = "0.8"
 
 # SSH / PTY
 russh = "0.45"
-# russh-sftp    = "2"
+russh-sftp = "2"
 # portable-pty  = "0.8"
 
 # Terminal

@@ -6,4 +6,5 @@
 pub mod hello;
 pub mod profiles;
 pub mod settings;
+pub mod sftp;
 pub mod ssh;
