@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tindra desktop — Phase 2 with profile manager.
-// Saved connection profiles live in <data_dir>/Tindra/profiles.json. The
-// left panel shows the profile list; the right panel is the terminal view
-// from Phase 1.3 (cell grid + raw keystrokes + auto-resize).
+// Tindra desktop — Phase 3 with tabs.
+// Each tab owns one SSH session (its own snapshot stream, cols/rows, error
+// state). Connect creates a new tab; the tab bar at the top of the terminal
+// pane lets the user switch between live sessions and close them.
 
 import 'dart:async';
 import 'dart:convert';
@@ -59,7 +59,40 @@ const TextStyle _termStyle = TextStyle(
   color: _termFg,
 );
 
-enum _ConnState { disconnected, connecting, connected }
+enum _ConnState { connecting, connected, disconnected }
+
+/// One live (or recently-live) SSH session. Held inside _ShellScreenState's
+/// `_tabs` list; the State is a thin shell around mutable fields here so
+/// setState on the outer widget rebuilds with the right tab.
+class _SessionTab {
+  _SessionTab({required this.profileId, required this.profileName});
+
+  final String profileId;
+  final String profileName;
+
+  BigInt? sessionId;
+  _ConnState state = _ConnState.connecting;
+  rust.TerminalSnapshot? snapshot;
+  StreamSubscription<rust.TerminalSnapshot>? outputSub;
+  String? error;
+
+  // Geometry last reported to the remote PTY for THIS session.
+  int cols = 120;
+  int rows = 32;
+  Timer? resizeDebounce;
+
+  Future<void> dispose() async {
+    resizeDebounce?.cancel();
+    await outputSub?.cancel();
+    final id = sessionId;
+    sessionId = null;
+    if (id != null) {
+      try {
+        await rust.shellClose(sessionId: id);
+      } catch (_) {}
+    }
+  }
+}
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
@@ -74,24 +107,21 @@ class _ShellScreenState extends State<ShellScreen> {
 
   // Profile state
   List<rust.Profile> _profiles = [];
-  String? _selectedId;
+  String? _selectedProfileId;
   bool _profilesLoading = true;
 
-  // Connection state
-  _ConnState _state = _ConnState.disconnected;
-  BigInt? _sessionId;
-  String? _activeProfileName; // for AppBar display while connected
-  StreamSubscription<rust.TerminalSnapshot>? _outputSub;
-  rust.TerminalSnapshot? _snapshot;
-  String? _error;
+  // Tab state
+  final List<_SessionTab> _tabs = [];
+  int _activeIdx = -1;
 
-  // Geometry tracking (cols/rows last reported to remote PTY).
-  int _cols = 120;
-  int _rows = 32;
-  Timer? _resizeDebounce;
+  // Sidebar-only error (separate from per-tab error)
+  String? _sidebarError;
 
-  rust.Profile? get _selected =>
-      _profiles.where((p) => p.id == _selectedId).firstOrNull;
+  rust.Profile? get _selectedProfile =>
+      _profiles.where((p) => p.id == _selectedProfileId).firstOrNull;
+
+  _SessionTab? get _activeTab =>
+      (_activeIdx >= 0 && _activeIdx < _tabs.length) ? _tabs[_activeIdx] : null;
 
   @override
   void initState() {
@@ -99,20 +129,22 @@ class _ShellScreenState extends State<ShellScreen> {
     _refreshProfiles();
   }
 
+  // ---------------------- Profile CRUD ----------------------
+
   Future<void> _refreshProfiles() async {
     try {
       final list = await rust.listProfiles();
       setState(() {
         _profiles = list;
         _profilesLoading = false;
-        if (_selectedId == null && list.isNotEmpty) {
-          _selectedId = list.first.id;
+        if (_selectedProfileId == null && list.isNotEmpty) {
+          _selectedProfileId = list.first.id;
         }
       });
     } catch (e) {
       setState(() {
         _profilesLoading = false;
-        _error = e.toString();
+        _sidebarError = e.toString();
       });
     }
   }
@@ -126,9 +158,9 @@ class _ShellScreenState extends State<ShellScreen> {
     try {
       final saved = await rust.upsertProfile(profile: result);
       await _refreshProfiles();
-      setState(() => _selectedId = saved.id);
+      setState(() => _selectedProfileId = saved.id);
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _sidebarError = e.toString());
     }
   }
 
@@ -158,24 +190,27 @@ class _ShellScreenState extends State<ShellScreen> {
       await rust.deleteProfile(id: profile.id);
       await _refreshProfiles();
       setState(() {
-        if (_selectedId == profile.id) {
-          _selectedId = _profiles.isEmpty ? null : _profiles.first.id;
+        if (_selectedProfileId == profile.id) {
+          _selectedProfileId = _profiles.isEmpty ? null : _profiles.first.id;
         }
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _sidebarError = e.toString());
     }
   }
 
-  Future<void> _connect() async {
-    final p = _selected;
+  // ---------------------- Tab lifecycle ----------------------
+
+  Future<void> _connectSelected() async {
+    final p = _selectedProfile;
     if (p == null) return;
+
+    final tab = _SessionTab(profileId: p.id, profileName: p.name);
     setState(() {
-      _state = _ConnState.connecting;
-      _snapshot = null;
-      _error = null;
-      _activeProfileName = p.name;
+      _tabs.add(tab);
+      _activeIdx = _tabs.length - 1;
     });
+
     try {
       final id = await rust.openShellPubkey(
         host: p.host,
@@ -183,54 +218,82 @@ class _ShellScreenState extends State<ShellScreen> {
         username: p.username,
         privateKeyPath: p.privateKeyPath,
         passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
-        cols: _cols,
-        rows: _rows,
+        cols: tab.cols,
+        rows: tab.rows,
       );
-      _sessionId = id;
-      _outputSub = rust.shellOutputStream(sessionId: id).listen(
-        (snap) => setState(() => _snapshot = snap),
+      tab.sessionId = id;
+      tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
+        (snap) {
+          tab.snapshot = snap;
+          if (mounted) setState(() {});
+        },
         onError: (e) {
-          setState(() {
-            _error = e.toString();
-            _state = _ConnState.disconnected;
-          });
+          tab.error = e.toString();
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
         },
         onDone: () {
-          setState(() => _state = _ConnState.disconnected);
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
         },
       );
-      setState(() => _state = _ConnState.connected);
+      tab.state = _ConnState.connected;
+      if (mounted) setState(() {});
       _passphrase.clear();
       _termFocus.requestFocus();
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _state = _ConnState.disconnected;
-        _activeProfileName = null;
-      });
+      tab.error = e.toString();
+      tab.state = _ConnState.disconnected;
+      if (mounted) setState(() {});
     }
   }
 
-  Future<void> _disconnect() async {
-    final id = _sessionId;
-    if (id == null) return;
-    await _outputSub?.cancel();
-    _outputSub = null;
-    await rust.shellClose(sessionId: id);
+  Future<void> _disconnectActive() async {
+    final tab = _activeTab;
+    if (tab == null) return;
+    final id = tab.sessionId;
+    await tab.outputSub?.cancel();
+    tab.outputSub = null;
+    if (id != null) {
+      await rust.shellClose(sessionId: id);
+    }
+    tab.sessionId = null;
+    tab.state = _ConnState.disconnected;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _closeTab(int idx) async {
+    if (idx < 0 || idx >= _tabs.length) return;
+    final tab = _tabs[idx];
+    await tab.dispose();
     setState(() {
-      _sessionId = null;
-      _state = _ConnState.disconnected;
-      _activeProfileName = null;
+      _tabs.removeAt(idx);
+      if (_tabs.isEmpty) {
+        _activeIdx = -1;
+      } else if (_activeIdx >= _tabs.length) {
+        _activeIdx = _tabs.length - 1;
+      } else if (_activeIdx > idx) {
+        _activeIdx -= 1;
+      }
     });
   }
 
+  void _switchTab(int idx) {
+    if (idx == _activeIdx) return;
+    setState(() => _activeIdx = idx);
+    _termFocus.requestFocus();
+  }
+
+  // ---------------------- Terminal I/O for active tab ----------------------
+
   Future<void> _writeBytes(List<int> bytes) async {
-    final id = _sessionId;
-    if (id == null) return;
+    final tab = _activeTab;
+    if (tab == null || tab.sessionId == null) return;
     try {
-      await rust.shellWrite(sessionId: id, data: bytes);
+      await rust.shellWrite(sessionId: tab.sessionId!, data: bytes);
     } catch (e) {
-      setState(() => _error = e.toString());
+      tab.error = e.toString();
+      if (mounted) setState(() {});
     }
   }
 
@@ -301,26 +364,23 @@ class _ShellScreenState extends State<ShellScreen> {
       final ch = event.character;
       if (ch != null && ch.isNotEmpty) {
         final code = ch.toUpperCase().codeUnitAt(0);
-        if (code >= 0x40 && code <= 0x5F) {
-          return [code - 0x40];
-        }
+        if (code >= 0x40 && code <= 0x5F) return [code - 0x40];
       }
     }
     if (alt) {
       final ch = event.character;
-      if (ch != null && ch.isNotEmpty) {
-        return [0x1b, ...utf8.encode(ch)];
-      }
+      if (ch != null && ch.isNotEmpty) return [0x1b, ...utf8.encode(ch)];
     }
     final ch = event.character;
-    if (ch != null && ch.isNotEmpty) {
-      return utf8.encode(ch);
-    }
+    if (ch != null && ch.isNotEmpty) return utf8.encode(ch);
     return null;
   }
 
   KeyEventResult _onTermKey(FocusNode node, KeyEvent event) {
-    if (_state != _ConnState.connected) return KeyEventResult.ignored;
+    final tab = _activeTab;
+    if (tab == null || tab.state != _ConnState.connected) {
+      return KeyEventResult.ignored;
+    }
     final bytes = _keyEventToBytes(event);
     if (bytes != null) {
       _writeBytes(bytes);
@@ -330,23 +390,23 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   void _scheduleResize(int cols, int rows) {
-    if (cols == _cols && rows == _rows) return;
-    _resizeDebounce?.cancel();
-    _resizeDebounce = Timer(const Duration(milliseconds: 200), () {
-      final id = _sessionId;
-      if (id == null || _state != _ConnState.connected) return;
-      _cols = cols;
-      _rows = rows;
+    final tab = _activeTab;
+    if (tab == null) return;
+    if (cols == tab.cols && rows == tab.rows) return;
+    tab.resizeDebounce?.cancel();
+    tab.resizeDebounce = Timer(const Duration(milliseconds: 200), () {
+      final id = tab.sessionId;
+      if (id == null || tab.state != _ConnState.connected) return;
+      tab.cols = cols;
+      tab.rows = rows;
       rust.shellResize(sessionId: id, cols: cols, rows: rows);
     });
   }
 
   @override
   void dispose() {
-    _resizeDebounce?.cancel();
-    _outputSub?.cancel();
-    if (_sessionId != null) {
-      rust.shellClose(sessionId: _sessionId!);
+    for (final t in _tabs) {
+      t.dispose();
     }
     _passphrase.dispose();
     _termFocus.dispose();
@@ -355,11 +415,14 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tab = _activeTab;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_state == _ConnState.connected
-            ? 'Tindra · ${_activeProfileName ?? "session"}'
-            : 'Tindra'),
+        title: Text(
+          tab?.state == _ConnState.connected
+              ? 'Tindra · ${tab!.profileName}'
+              : 'Tindra',
+        ),
         backgroundColor: const Color(0xFF161A22),
       ),
       body: Padding(
@@ -369,40 +432,35 @@ class _ShellScreenState extends State<ShellScreen> {
           children: [
             SizedBox(width: 280, child: _sidePanel()),
             const SizedBox(width: 12),
-            Expanded(child: _terminalPanel()),
+            Expanded(child: _terminalArea()),
           ],
         ),
       ),
     );
   }
 
+  // ---------------------- Sidebar ----------------------
+
   Widget _sidePanel() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                'Profiles',
+        Row(children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: Text('Profiles',
                 style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF8AA0B5),
-                ),
-              ),
-            ),
-            const Spacer(),
-            IconButton(
-              icon: const Icon(Icons.add, size: 20),
-              tooltip: 'New profile',
-              onPressed: _state == _ConnState.disconnected
-                  ? () => _openProfileDialog()
-                  : null,
-            ),
-          ],
-        ),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF8AA0B5))),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.add, size: 20),
+            tooltip: 'New profile',
+            onPressed: () => _openProfileDialog(),
+          ),
+        ]),
         Expanded(
           child: Container(
             decoration: BoxDecoration(
@@ -412,65 +470,74 @@ class _ShellScreenState extends State<ShellScreen> {
             ),
             child: _profilesLoading
                 ? const Center(
-                    child:
-                        SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                    child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
                   )
                 : _profiles.isEmpty
                     ? _emptyState()
                     : ListView.builder(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         itemCount: _profiles.length,
-                        itemBuilder: (_, i) =>
-                            _profileTile(_profiles[i]),
+                        itemBuilder: (_, i) => _profileTile(_profiles[i]),
                       ),
           ),
         ),
-        if (_selected != null) ...[
+        if (_selectedProfile != null) ...[
           const SizedBox(height: 10),
-          _connectionActions(_selected!),
+          _connectionActions(_selectedProfile!),
         ],
-        const SizedBox(height: 10),
-        if (_snapshot != null && _state == _ConnState.connected)
+        if (_activeTab?.snapshot != null &&
+            _activeTab!.state == _ConnState.connected) ...[
+          const SizedBox(height: 10),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
-              'grid: ${_snapshot!.cols}×${_snapshot!.rows}    '
-              'cursor: (${_snapshot!.cursorRow},${_snapshot!.cursorCol})',
+              'grid: ${_activeTab!.snapshot!.cols}×${_activeTab!.snapshot!.rows}    '
+              'cursor: (${_activeTab!.snapshot!.cursorRow},${_activeTab!.snapshot!.cursorCol})',
               style: const TextStyle(
-                fontSize: 11,
-                color: Color(0xFF8AA0B5),
-                fontFamily: 'Consolas',
-              ),
+                  fontSize: 11,
+                  color: Color(0xFF8AA0B5),
+                  fontFamily: 'Consolas'),
             ),
-          ),
-        if (_error != null) ...[
-          const SizedBox(height: 10),
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF2A1417),
-              border: Border.all(color: const Color(0xFFFF6E6E)),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            padding: const EdgeInsets.all(10),
-            child: Row(children: [
-              Expanded(
-                child: Text(
-                  _error!,
-                  style: const TextStyle(
-                    color: Color(0xFFFFB4B4),
-                    fontFamily: 'Consolas',
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, size: 16),
-                onPressed: () => setState(() => _error = null),
-              ),
-            ]),
           ),
         ],
+        if (_sidebarError != null) ...[
+          const SizedBox(height: 10),
+          _errorBox(_sidebarError!,
+              onClose: () => setState(() => _sidebarError = null)),
+        ],
+        if (_activeTab?.error != null) ...[
+          const SizedBox(height: 10),
+          _errorBox(_activeTab!.error!,
+              onClose: () => setState(() => _activeTab!.error = null)),
+        ],
       ],
+    );
+  }
+
+  Widget _errorBox(String msg, {required VoidCallback onClose}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A1417),
+        border: Border.all(color: const Color(0xFFFF6E6E)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Row(children: [
+        Expanded(
+          child: Text(msg,
+              style: const TextStyle(
+                  color: Color(0xFFFFB4B4),
+                  fontFamily: 'Consolas',
+                  fontSize: 12)),
+        ),
+        IconButton(
+          icon: const Icon(Icons.close, size: 16),
+          onPressed: onClose,
+        ),
+      ]),
     );
   }
 
@@ -484,10 +551,8 @@ class _ShellScreenState extends State<ShellScreen> {
             const Icon(Icons.dns_outlined,
                 size: 36, color: Color(0xFF8AA0B5)),
             const SizedBox(height: 8),
-            const Text(
-              'No profiles yet',
-              style: TextStyle(color: Color(0xFF8AA0B5)),
-            ),
+            const Text('No profiles yet',
+                style: TextStyle(color: Color(0xFF8AA0B5))),
             const SizedBox(height: 8),
             FilledButton.tonalIcon(
               onPressed: () => _openProfileDialog(),
@@ -501,20 +566,17 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Widget _profileTile(rust.Profile p) {
-    final selected = p.id == _selectedId;
+    final selected = p.id == _selectedProfileId;
     return InkWell(
-      onTap: _state == _ConnState.disconnected
-          ? () => setState(() => _selectedId = p.id)
-          : null,
+      onTap: () => setState(() => _selectedProfileId = p.id),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: selected ? const Color(0xFF1B2030) : null,
           border: Border(
             left: BorderSide(
-              color: selected
-                  ? const Color(0xFF7AC0FF)
-                  : Colors.transparent,
+              color:
+                  selected ? const Color(0xFF7AC0FF) : Colors.transparent,
               width: 3,
             ),
           ),
@@ -524,20 +586,17 @@ class _ShellScreenState extends State<ShellScreen> {
           children: [
             Text(
               p.name.isEmpty ? '(unnamed)' : p.name,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
+              style:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 2),
             Text(
               '${p.username}@${p.host}${p.port == 22 ? "" : ":${p.port}"}',
               style: const TextStyle(
-                fontSize: 11,
-                color: Color(0xFF8AA0B5),
-                fontFamily: 'Consolas',
-              ),
+                  fontSize: 11,
+                  color: Color(0xFF8AA0B5),
+                  fontFamily: 'Consolas'),
               overflow: TextOverflow.ellipsis,
             ),
           ],
@@ -547,54 +606,27 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Widget _connectionActions(rust.Profile p) {
-    if (_state == _ConnState.connected) {
-      return FilledButton.icon(
-        onPressed: _disconnect,
-        icon: const Icon(Icons.link_off),
-        label: const Text('Disconnect'),
-        style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF8B2C2C),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-        ),
-      );
-    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(children: [
-          Expanded(
-            child: TextField(
-              controller: _passphrase,
-              obscureText: true,
-              enabled: _state == _ConnState.disconnected,
-              decoration: const InputDecoration(
-                hintText: 'Key passphrase (if any)',
-                hintStyle: TextStyle(fontSize: 12),
-              ),
-              style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
-            ),
+        TextField(
+          controller: _passphrase,
+          obscureText: true,
+          decoration: const InputDecoration(
+            hintText: 'Key passphrase (if any)',
+            hintStyle: TextStyle(fontSize: 12),
           ),
-        ]),
+          style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
+        ),
         const SizedBox(height: 6),
-        if (_state == _ConnState.connecting)
-          FilledButton.icon(
-            onPressed: null,
-            icon: const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            label: const Text('Connecting…'),
-          )
-        else
-          FilledButton.icon(
-            onPressed: _connect,
-            icon: const Icon(Icons.link),
-            label: Text('Connect to ${p.name}'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
+        FilledButton.icon(
+          onPressed: _connectSelected,
+          icon: const Icon(Icons.add_link),
+          label: Text('Open ${p.name}'),
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 12),
           ),
+        ),
         const SizedBox(height: 6),
         Row(children: [
           Expanded(
@@ -612,6 +644,130 @@ class _ShellScreenState extends State<ShellScreen> {
           ),
         ]),
       ],
+    );
+  }
+
+  // ---------------------- Terminal area (tab bar + active terminal) ----------------------
+
+  Widget _terminalArea() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _tabBar(),
+        const SizedBox(height: 8),
+        Expanded(child: _terminalPanel()),
+      ],
+    );
+  }
+
+  Widget _tabBar() {
+    if (_tabs.isEmpty) {
+      return SizedBox(
+        height: 36,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'no open sessions',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return SizedBox(
+      height: 36,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _tabs.length + 1,
+        itemBuilder: (_, i) {
+          if (i == _tabs.length) {
+            // trailing "+" — opens connect-with-current-selection
+            return Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: IconButton(
+                icon: const Icon(Icons.add, size: 18),
+                tooltip: _selectedProfile == null
+                    ? 'Pick a profile to open'
+                    : 'Open ${_selectedProfile!.name}',
+                onPressed:
+                    _selectedProfile == null ? null : _connectSelected,
+              ),
+            );
+          }
+          return _tab(i);
+        },
+      ),
+    );
+  }
+
+  Widget _tab(int i) {
+    final tab = _tabs[i];
+    final active = i == _activeIdx;
+    final stateColor = switch (tab.state) {
+      _ConnState.connecting => const Color(0xFFFFB86C),
+      _ConnState.connected => const Color(0xFF4ADE80),
+      _ConnState.disconnected => const Color(0xFFFF6E6E),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Material(
+        color: active ? const Color(0xFF1B2030) : const Color(0xFF13161E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(
+            color: active
+                ? const Color(0xFF7AC0FF)
+                : const Color(0xFF1F2937),
+            width: 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: () => _switchTab(i),
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: stateColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  tab.profileName,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: active
+                        ? const Color(0xFFE3E9F1)
+                        : const Color(0xFF8AA0B5),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () => _closeTab(i),
+                  borderRadius: BorderRadius.circular(10),
+                  child: const Padding(
+                    padding: EdgeInsets.all(2),
+                    child:
+                        Icon(Icons.close, size: 14, color: Color(0xFF8AA0B5)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -654,11 +810,11 @@ class _ShellScreenState extends State<ShellScreen> {
                 return Padding(
                   padding: const EdgeInsets.all(padding),
                   child: _CellGrid(
-                    snapshot: _snapshot,
-                    state: _state,
+                    tab: _activeTab,
                     isFocused: _termFocus.hasFocus,
                     charWidth: charWidth,
                     lineHeight: lineHeight,
+                    onDisconnect: _disconnectActive,
                   ),
                 );
               },
@@ -672,34 +828,67 @@ class _ShellScreenState extends State<ShellScreen> {
 
 class _CellGrid extends StatelessWidget {
   const _CellGrid({
-    required this.snapshot,
-    required this.state,
+    required this.tab,
     required this.isFocused,
     required this.charWidth,
     required this.lineHeight,
+    required this.onDisconnect,
   });
 
-  final rust.TerminalSnapshot? snapshot;
-  final _ConnState state;
+  final _SessionTab? tab;
   final bool isFocused;
   final double charWidth;
   final double lineHeight;
+  final VoidCallback onDisconnect;
 
   @override
   Widget build(BuildContext context) {
-    if (snapshot == null) {
+    if (tab == null) {
       return Center(
         child: Text(
-          state == _ConnState.connected
-              ? 'waiting for first chunk…'
-              : state == _ConnState.connecting
-                  ? 'connecting…'
-                  : 'Pick a profile on the left, then Connect.',
+          'Pick a profile on the left, then "Open" to start a session.',
           style: TextStyle(color: Colors.grey.shade500),
         ),
       );
     }
-    final s = snapshot!;
+    final t = tab!;
+    if (t.state == _ConnState.connecting) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(height: 12),
+            Text('Connecting to ${t.profileName}…',
+                style: TextStyle(color: Colors.grey.shade400)),
+          ],
+        ),
+      );
+    }
+    if (t.state == _ConnState.disconnected && t.snapshot == null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.link_off, size: 32, color: Colors.grey.shade600),
+            const SizedBox(height: 8),
+            Text('Disconnected',
+                style: TextStyle(color: Colors.grey.shade400)),
+          ],
+        ),
+      );
+    }
+    final s = t.snapshot;
+    if (s == null) {
+      return Center(
+        child: Text('waiting for first chunk…',
+            style: TextStyle(color: Colors.grey.shade500)),
+      );
+    }
     final spans = _buildSpans(s);
 
     return Stack(
@@ -711,7 +900,7 @@ class _CellGrid extends StatelessWidget {
             style: _termStyle,
           ),
         ),
-        if (s.cursorVisible)
+        if (s.cursorVisible && t.state == _ConnState.connected)
           Positioned(
             left: s.cursorCol * charWidth,
             top: s.cursorRow * lineHeight,
@@ -729,6 +918,22 @@ class _CellGrid extends StatelessWidget {
                           color: const Color(0xFF7AC0FF).withValues(alpha: 0.6),
                           width: 1,
                         ),
+                ),
+              ),
+            ),
+          ),
+        if (t.state == _ConnState.disconnected)
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Material(
+              color: const Color(0xFF8B2C2C).withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(4),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Text(
+                  'disconnected',
+                  style: TextStyle(fontSize: 11, color: Colors.white),
                 ),
               ),
             ),
