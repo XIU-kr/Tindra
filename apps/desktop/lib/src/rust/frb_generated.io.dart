@@ -5,6 +5,7 @@
 
 import 'api/hello.dart';
 import 'api/profiles.dart';
+import 'api/settings.dart';
 import 'api/ssh.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -41,6 +42,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Profile dco_decode_box_autoadd_profile(dynamic raw);
 
   @protected
+  Settings dco_decode_box_autoadd_settings(dynamic raw);
+
+  @protected
   Cell dco_decode_cell(dynamic raw);
 
   @protected
@@ -48,6 +52,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CommandOutput dco_decode_command_output(dynamic raw);
+
+  @protected
+  double dco_decode_f_32(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
@@ -72,6 +79,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Profile dco_decode_profile(dynamic raw);
+
+  @protected
+  Settings dco_decode_settings(dynamic raw);
 
   @protected
   TerminalSnapshot dco_decode_terminal_snapshot(dynamic raw);
@@ -112,6 +122,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Profile sse_decode_box_autoadd_profile(SseDeserializer deserializer);
 
   @protected
+  Settings sse_decode_box_autoadd_settings(SseDeserializer deserializer);
+
+  @protected
   Cell sse_decode_cell(SseDeserializer deserializer);
 
   @protected
@@ -119,6 +132,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CommandOutput sse_decode_command_output(SseDeserializer deserializer);
+
+  @protected
+  double sse_decode_f_32(SseDeserializer deserializer);
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
@@ -143,6 +159,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Profile sse_decode_profile(SseDeserializer deserializer);
+
+  @protected
+  Settings sse_decode_settings(SseDeserializer deserializer);
 
   @protected
   TerminalSnapshot sse_decode_terminal_snapshot(SseDeserializer deserializer);
@@ -190,6 +209,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_profile(Profile self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_settings(Settings self, SseSerializer serializer);
+
+  @protected
   void sse_encode_cell(Cell self, SseSerializer serializer);
 
   @protected
@@ -197,6 +219,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_command_output(CommandOutput self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_f_32(double self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
@@ -224,6 +249,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_profile(Profile self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_settings(Settings self, SseSerializer serializer);
 
   @protected
   void sse_encode_terminal_snapshot(

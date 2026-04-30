@@ -5,6 +5,7 @@
 
 import 'api/hello.dart';
 import 'api/profiles.dart';
+import 'api/settings.dart';
 import 'api/ssh.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -68,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -2065815097;
+  int get rustContentHash => 1453130786;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -89,6 +90,8 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiHelloInitApp();
 
   Future<List<Profile>> crateApiProfilesListProfiles();
+
+  Future<Settings> crateApiSettingsLoadSettings();
 
   Future<BigInt> crateApiSshOpenShellAgent({
     required String host,
@@ -120,6 +123,8 @@ abstract class RustLibApi extends BaseApi {
     String? passphrase,
     required String command,
   });
+
+  Future<void> crateApiSettingsSaveSettings({required Settings settings});
 
   Future<void> crateApiSshShellClose({required BigInt sessionId});
 
@@ -277,6 +282,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "list_profiles", argNames: []);
 
   @override
+  Future<Settings> crateApiSettingsLoadSettings() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_settings,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSettingsLoadSettingsConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSettingsLoadSettingsConstMeta =>
+      const TaskConstMeta(debugName: "load_settings", argNames: []);
+
+  @override
   Future<BigInt> crateApiSshOpenShellAgent({
     required String host,
     required int port,
@@ -298,7 +330,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 7,
             port: port_,
           );
         },
@@ -344,7 +376,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 8,
             port: port_,
           );
         },
@@ -391,7 +423,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 9,
             port: port_,
           );
         },
@@ -431,7 +463,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 10,
             port: port_,
           );
         },
@@ -460,6 +492,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiSettingsSaveSettings({required Settings settings}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_settings(settings, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSettingsSaveSettingsConstMeta,
+        argValues: [settings],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSettingsSaveSettingsConstMeta =>
+      const TaskConstMeta(debugName: "save_settings", argNames: ["settings"]);
+
+  @override
   Future<void> crateApiSshShellClose({required BigInt sessionId}) {
     return handler.executeNormal(
       NormalTask(
@@ -469,7 +529,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 12,
             port: port_,
           );
         },
@@ -502,7 +562,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 11,
+              funcId: 13,
               port: port_,
             );
           },
@@ -541,7 +601,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 14,
             port: port_,
           );
         },
@@ -575,7 +635,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 15,
             port: port_,
           );
         },
@@ -605,7 +665,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 16,
             port: port_,
           );
         },
@@ -662,6 +722,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Settings dco_decode_box_autoadd_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_settings(raw);
+  }
+
+  @protected
   Cell dco_decode_cell(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -700,6 +766,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       stdout: dco_decode_String(arr[1]),
       stderr: dco_decode_String(arr[2]),
     );
+  }
+
+  @protected
+  double dco_decode_f_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
   }
 
   @protected
@@ -772,6 +844,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       jumpPort: dco_decode_u_16(arr[9]),
       jumpUsername: dco_decode_String(arr[10]),
       jumpPrivateKeyPath: dco_decode_String(arr[11]),
+    );
+  }
+
+  @protected
+  Settings dco_decode_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return Settings(
+      theme: dco_decode_String(arr[0]),
+      fontFamily: dco_decode_String(arr[1]),
+      fontSize: dco_decode_f_32(arr[2]),
+      quakeHotkey: dco_decode_String(arr[3]),
     );
   }
 
@@ -863,6 +949,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Settings sse_decode_box_autoadd_settings(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_settings(deserializer));
+  }
+
+  @protected
   Cell sse_decode_cell(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_ch = sse_decode_String(deserializer);
@@ -893,6 +985,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       stdout: var_stdout,
       stderr: var_stderr,
     );
+  }
+
+  @protected
+  double sse_decode_f_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getFloat32();
   }
 
   @protected
@@ -995,6 +1093,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       jumpPort: var_jumpPort,
       jumpUsername: var_jumpUsername,
       jumpPrivateKeyPath: var_jumpPrivateKeyPath,
+    );
+  }
+
+  @protected
+  Settings sse_decode_settings(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_theme = sse_decode_String(deserializer);
+    var var_fontFamily = sse_decode_String(deserializer);
+    var var_fontSize = sse_decode_f_32(deserializer);
+    var var_quakeHotkey = sse_decode_String(deserializer);
+    return Settings(
+      theme: var_theme,
+      fontFamily: var_fontFamily,
+      fontSize: var_fontSize,
+      quakeHotkey: var_quakeHotkey,
     );
   }
 
@@ -1102,6 +1215,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_settings(
+    Settings self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_settings(self, serializer);
+  }
+
+  @protected
   void sse_encode_cell(Cell self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.ch, serializer);
@@ -1125,6 +1247,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.exitCode, serializer);
     sse_encode_String(self.stdout, serializer);
     sse_encode_String(self.stderr, serializer);
+  }
+
+  @protected
+  void sse_encode_f_32(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putFloat32(self);
   }
 
   @protected
@@ -1208,6 +1336,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_16(self.jumpPort, serializer);
     sse_encode_String(self.jumpUsername, serializer);
     sse_encode_String(self.jumpPrivateKeyPath, serializer);
+  }
+
+  @protected
+  void sse_encode_settings(Settings self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.theme, serializer);
+    sse_encode_String(self.fontFamily, serializer);
+    sse_encode_f_32(self.fontSize, serializer);
+    sse_encode_String(self.quakeHotkey, serializer);
   }
 
   @protected

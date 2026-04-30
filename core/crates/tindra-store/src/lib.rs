@@ -32,6 +32,45 @@ pub enum StoreError {
     NotFound(String),
 }
 
+/// User-editable settings: theme, terminal font, and shortcut bindings.
+/// Persisted alongside profiles in the same data dir as `settings.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    /// "dark" (default), "light", or "system".
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    /// Monospaced font family for the terminal grid.
+    #[serde(default = "default_font_family")]
+    pub font_family: String,
+    /// Terminal font size in logical pixels.
+    #[serde(default = "default_font_size")]
+    pub font_size: f32,
+    /// Quake mode global hotkey (e.g. "F12"). Empty disables.
+    #[serde(default)]
+    pub quake_hotkey: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            theme: default_theme(),
+            font_family: default_font_family(),
+            font_size: default_font_size(),
+            quake_hotkey: String::new(),
+        }
+    }
+}
+
+fn default_theme() -> String {
+    "dark".to_string()
+}
+fn default_font_family() -> String {
+    "Consolas".to_string()
+}
+fn default_font_size() -> f32 {
+    13.0
+}
+
 /// One saved SSH connection. Passphrases are NOT persisted — Phase 4 will add
 /// per-profile passphrase entries in the OS keychain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,4 +208,37 @@ pub async fn delete_profile(id: String) -> Result<(), StoreError> {
 pub async fn store_path() -> Result<PathBuf, StoreError> {
     let guard = ensure_loaded().await?;
     Ok(guard.as_ref().unwrap().path.clone())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 — settings (theme / font / hotkeys)
+// ---------------------------------------------------------------------------
+
+fn settings_path() -> Result<PathBuf, StoreError> {
+    let dir = dirs::data_dir().ok_or(StoreError::NoDataDir)?;
+    Ok(dir.join("Tindra").join("settings.json"))
+}
+
+pub async fn load_settings() -> Result<Settings, StoreError> {
+    let path = settings_path()?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub async fn save_settings(settings: Settings) -> Result<(), StoreError> {
+    let path = settings_path()?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let bytes = serde_json::to_vec_pretty(&settings)?;
+    let tmp = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp, &bytes).await?;
+    tokio::fs::rename(&tmp, &path).await?;
+    Ok(())
 }
