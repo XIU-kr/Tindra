@@ -40,13 +40,9 @@ macos/Flutter/ephemeral/
 windows/flutter/ephemeral/
 
 # ===== flutter_rust_bridge =====
-# Generated bridge artifacts (commit only the source spec, not the codegen output by default)
-# Override per-crate with !rules below if needed.
-**/frb_generated.dart
-**/frb_generated.io.dart
-**/frb_generated.web.dart
-**/frb_generated.rs
-**/frb_generated.h
+# Generated bridge artifacts ARE committed so fresh clones build without
+# requiring contributors to install flutter_rust_bridge_codegen first.
+# CI verifies they're up to date with the Rust API.
 
 # ===== IDE / OS =====
 .vscode/
