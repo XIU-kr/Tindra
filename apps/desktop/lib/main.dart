@@ -83,14 +83,22 @@ class _SessionTab {
 
   Future<void> dispose() async {
     resizeDebounce?.cancel();
-    await outputSub?.cancel();
     final id = sessionId;
     sessionId = null;
+    // Tell Rust to drop its StreamSink first so the Dart subscription will
+    // see `done` and unblock. If we cancel the subscription first, frb 2.x
+    // awaits the Rust task to acknowledge the cancel, but that task is
+    // blocked reading from the SSH channel — deadlock.
     if (id != null) {
       try {
         await rust.shellClose(sessionId: id);
       } catch (_) {}
     }
+    // The cancel will complete on its own once the stream emits done; don't
+    // block UI close on it.
+    final sub = outputSub;
+    outputSub = null;
+    sub?.cancel();
   }
 }
 
@@ -252,11 +260,14 @@ class _ShellScreenState extends State<ShellScreen> {
     final tab = _activeTab;
     if (tab == null) return;
     final id = tab.sessionId;
-    await tab.outputSub?.cancel();
-    tab.outputSub = null;
+    // shellClose first so the Rust StreamSink drops; otherwise cancelling
+    // the Dart subscription deadlocks waiting for the Rust task to ack.
     if (id != null) {
       await rust.shellClose(sessionId: id);
     }
+    final sub = tab.outputSub;
+    tab.outputSub = null;
+    sub?.cancel();
     tab.sessionId = null;
     tab.state = _ConnState.disconnected;
     if (mounted) setState(() {});
@@ -754,9 +765,10 @@ class _ShellScreenState extends State<ShellScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                InkWell(
+                GestureDetector(
+                  key: ValueKey('tab-close-$i'),
+                  behavior: HitTestBehavior.opaque,
                   onTap: () => _closeTab(i),
-                  borderRadius: BorderRadius.circular(10),
                   child: const Padding(
                     padding: EdgeInsets.all(2),
                     child:
