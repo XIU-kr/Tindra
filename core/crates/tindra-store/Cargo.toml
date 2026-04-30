@@ -1,0 +1,22 @@
+[package]
+name = "tindra-store"
+description = "Encrypted local store for profiles, keys, snippets, host fingerprints (SQLCipher + age)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+tokio.workspace     = true
+thiserror.workspace = true
+tracing.workspace   = true
+zeroize.workspace   = true
+age.workspace       = true
+argon2.workspace    = true
+serde.workspace     = true
+serde_json.workspace = true
+
+# rusqlite = { workspace = true }

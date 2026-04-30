@@ -1,0 +1,19 @@
+# flutter_rust_bridge codegen config (frb 2.x)
+#
+# Regenerate bindings after editing the API surface:
+#   cargo install flutter_rust_bridge_codegen --version "^2"
+#   flutter_rust_bridge_codegen generate
+#
+# All paths are relative to this file.
+
+rust_input: ../core/crates/tindra-core/src/api/**/*.rs
+rust_root: ../core/crates/tindra-core
+dart_output: ../apps/shared_ui/lib/src/bridge
+dart_entrypoint_class_name: TindraBridge
+
+# Multi-blocks-per-file mode keeps the bridge surface organized by domain
+# (session.rs, profiles.rs, sftp.rs, sync.rs, mcp.rs, ai.rs, plugins.rs).
+full_dep: false
+
+# Stable codegen output across machines
+stable_dart_2: true

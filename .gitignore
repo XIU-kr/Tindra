@@ -1,0 +1,80 @@
+# ===== Rust =====
+/core/target/
+**/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# ===== Flutter / Dart =====
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.dart_tool/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/App.framework
+ios/Flutter/Generated.xcconfig
+ios/Flutter/ephemeral/
+android/.gradle/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+**/.idea/
+*.iml
+
+# Flutter platform-specific generated
+linux/flutter/ephemeral/
+macos/Flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# ===== flutter_rust_bridge =====
+# Generated bridge artifacts (commit only the source spec, not the codegen output by default)
+# Override per-crate with !rules below if needed.
+**/frb_generated.dart
+**/frb_generated.io.dart
+**/frb_generated.web.dart
+**/frb_generated.rs
+**/frb_generated.h
+
+# ===== IDE / OS =====
+.vscode/
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*.iml
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ===== Secrets / Local =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/test/**/*.pem
+!**/test/**/*.key
+secrets/
+*.local
+local.*
+
+# ===== Misc =====
+*.log
+*.pid
+node_modules/
+coverage/
+*.lcov

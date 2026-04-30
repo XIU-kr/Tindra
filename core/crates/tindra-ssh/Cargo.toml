@@ -1,0 +1,22 @@
+[package]
+name = "tindra-ssh"
+description = "SSH transport for Tindra (russh-based)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+tokio.workspace      = true
+futures.workspace    = true
+async-trait.workspace = true
+thiserror.workspace  = true
+tracing.workspace    = true
+zeroize.workspace    = true
+
+# To be enabled when SSH transport is wired up:
+# russh      = { workspace = true }
+# russh-keys = { workspace = true }

@@ -1,0 +1,76 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tindra-core",
+    "crates/tindra-ssh",
+    "crates/tindra-pty",
+    "crates/tindra-sftp",
+    "crates/tindra-term",
+    "crates/tindra-store",
+    "crates/tindra-sync",
+    "crates/tindra-mcp",
+    "crates/tindra-ai",
+    "crates/tindra-plug",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.78"
+license = "Apache-2.0"
+authors = ["The Tindra Authors"]
+repository = "https://github.com/tindra/tindra"
+publish = false
+
+[workspace.dependencies]
+# Async / runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-util", "net", "time", "fs"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Errors / logging
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Crypto / secrets
+zeroize = { version = "1", features = ["derive"] }
+age = "0.10"
+argon2 = "0.5"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# SSH / PTY (pinned later when first wired up; placeholders)
+# russh         = "0.45"
+# russh-keys    = "0.45"
+# russh-sftp    = "2"
+# portable-pty  = "0.8"
+
+# Terminal
+# alacritty_terminal = "0.22"
+# vt100              = "0.15"
+
+# Storage
+# rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
+
+# Sync
+# automerge = "0.5"
+
+# WASM plugin host
+# wasmtime = "23"
+
+# FFI
+# flutter_rust_bridge = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+debug = 1

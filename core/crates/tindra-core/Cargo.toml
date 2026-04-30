@@ -1,0 +1,36 @@
+[package]
+name = "tindra-core"
+description = "Public FFI surface for Tindra — re-exports session, profile, sync, and plugin APIs to Flutter via flutter_rust_bridge."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[features]
+# Mirrors tindra-plug's `plugins` feature; kept on by default. iOS builds pass
+# `--no-default-features` to disable plugin loading. Public API is unchanged.
+default = ["plugins"]
+plugins = ["tindra-plug/plugins"]
+
+[dependencies]
+tindra-ssh   = { path = "../tindra-ssh" }
+tindra-pty   = { path = "../tindra-pty" }
+tindra-sftp  = { path = "../tindra-sftp" }
+tindra-term  = { path = "../tindra-term" }
+tindra-store = { path = "../tindra-store" }
+tindra-sync  = { path = "../tindra-sync" }
+tindra-mcp   = { path = "../tindra-mcp" }
+tindra-ai    = { path = "../tindra-ai" }
+tindra-plug  = { path = "../tindra-plug", default-features = false }
+
+tokio.workspace      = true
+thiserror.workspace  = true
+anyhow.workspace     = true
+tracing.workspace    = true
+serde.workspace      = true

@@ -1,0 +1,22 @@
+Tindra
+Copyright 2026 The Tindra Authors
+
+This product includes software developed by The Tindra Authors and contributors.
+
+Portions of this software are licensed under the Apache License, Version 2.0
+(see LICENSE-APACHE). Sync backend components are licensed under the GNU Affero
+General Public License, Version 3.0 or later (see LICENSE-AGPL).
+
+This product includes or depends on the following third-party software:
+
+  - russh                  https://github.com/Eugeny/russh           Apache-2.0
+  - portable-pty           https://github.com/wez/wezterm            MIT
+  - alacritty_terminal     https://github.com/alacritty/alacritty    Apache-2.0
+  - flutter_rust_bridge    https://github.com/fzyzcjy/flutter_rust_bridge  MIT
+  - automerge              https://github.com/automerge/automerge    MIT
+  - wasmtime               https://github.com/bytecodealliance/wasmtime  Apache-2.0 with LLVM exception
+  - age                    https://github.com/str4d/rage             MIT/Apache-2.0
+  - SQLCipher              https://github.com/sqlcipher/sqlcipher    BSD-3-Clause-style
+
+Full license texts and attribution are reproduced in third-party-licenses/ when
+distributed in binary form.

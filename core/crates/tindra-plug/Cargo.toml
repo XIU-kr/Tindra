@@ -1,0 +1,28 @@
+[package]
+name = "tindra-plug"
+description = "WebAssembly plugin host (wasmtime + WIT component model) for Tindra."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# `plugins` toggles the actual WASM host (wasmtime + WIT). When off, the crate
+# still exposes its public API but every call returns `Error::Unsupported`.
+# iOS builds disable this feature (App Store Review Guideline 2.5.2 forbids
+# loading user-supplied executable code at runtime).
+default = ["plugins"]
+plugins = []
+
+[dependencies]
+tokio.workspace     = true
+thiserror.workspace = true
+tracing.workspace   = true
+serde.workspace     = true
+serde_json.workspace = true
+
+# Enabled only when the `plugins` feature is on:
+# wasmtime = { workspace = true, optional = true }

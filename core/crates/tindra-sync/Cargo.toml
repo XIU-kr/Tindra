@@ -1,0 +1,22 @@
+[package]
+name = "tindra-sync"
+description = "End-to-end encrypted profile sync (CRDT + age)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+tindra-store = { path = "../tindra-store" }
+
+tokio.workspace     = true
+thiserror.workspace = true
+tracing.workspace   = true
+zeroize.workspace   = true
+age.workspace       = true
+serde.workspace     = true
+
+# automerge = { workspace = true }

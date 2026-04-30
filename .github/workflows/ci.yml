@@ -1,0 +1,181 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust-lint:
+    name: Rust lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - name: cargo fmt
+        working-directory: core
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        working-directory: core
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rust-build:
+    name: Rust build (${{ matrix.os }})
+    needs: rust-lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          key: ${{ matrix.os }}
+      - name: cargo check
+        working-directory: core
+        run: cargo check --workspace --all-targets
+      - name: cargo test
+        working-directory: core
+        run: cargo test --workspace
+
+  rust-android:
+    name: Rust Android (aarch64)
+    needs: rust-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          key: android
+      - name: cargo check (android)
+        working-directory: core
+        env:
+          CC_aarch64_linux_android: aarch64-linux-android30-clang
+          AR_aarch64_linux_android: llvm-ar
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: aarch64-linux-android30-clang
+        run: |
+          export PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          cargo check --workspace --target aarch64-linux-android
+
+  rust-ios:
+    name: Rust iOS (${{ matrix.target }})
+    needs: rust-lint
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-ios       # iPhone / iPad (device)
+          - aarch64-apple-ios-sim   # Apple Silicon simulator
+          - x86_64-apple-ios        # Intel simulator (legacy CI hosts)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          key: ios-${{ matrix.target }}
+      - name: cargo check (iOS, plugins feature off)
+        working-directory: core
+        # iOS builds disable the WASM plugin host (App Store Review Guideline 2.5.2).
+        run: cargo check --workspace --target ${{ matrix.target }} --no-default-features
+
+  # Flutter jobs are gated until `flutter create` has been run for each app.
+  # Re-enable by removing the `if: false` once apps/desktop/pubspec.yaml exists.
+  flutter-desktop:
+    name: Flutter desktop (${{ matrix.os }})
+    if: false
+    needs: rust-build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: dtolnay/rust-toolchain@stable
+      - name: flutter pub get
+        working-directory: apps/desktop
+        run: flutter pub get
+      - name: flutter analyze
+        working-directory: apps/desktop
+        run: flutter analyze
+      - name: flutter test
+        working-directory: apps/desktop
+        run: flutter test
+
+  flutter-android:
+    name: Flutter Android
+    if: false
+    needs: [rust-build, rust-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+      - name: flutter pub get
+        working-directory: apps/mobile
+        run: flutter pub get
+      - name: flutter build apk --debug
+        working-directory: apps/mobile
+        run: flutter build apk --debug
+
+  flutter-ios:
+    name: Flutter iOS (simulator)
+    if: false
+    needs: [rust-build, rust-ios]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - name: flutter pub get
+        working-directory: apps/mobile
+        run: flutter pub get
+      - name: pod install
+        working-directory: apps/mobile/ios
+        run: pod install
+      # `--no-codesign` builds for the simulator; signed device builds happen
+      # in the release workflow with provisioning profiles.
+      - name: flutter build ios --simulator --no-codesign
+        working-directory: apps/mobile
+        run: flutter build ios --simulator --no-codesign

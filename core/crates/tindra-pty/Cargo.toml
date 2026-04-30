@@ -1,0 +1,18 @@
+[package]
+name = "tindra-pty"
+description = "PTY abstraction for Tindra (portable-pty: ConPTY/winpty/unix)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+tokio.workspace     = true
+thiserror.workspace = true
+tracing.workspace   = true
+
+# Enabled when local-shell tabs land:
+# portable-pty = { workspace = true }
