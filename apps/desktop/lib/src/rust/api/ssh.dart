@@ -6,9 +6,10 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `meta_registry`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `SessionMeta`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`
 
-/// Connect, run one command, return its combined output and exit code.
 Future<CommandOutput> runCommandPubkey({
   required String host,
   required int port,
@@ -25,8 +26,6 @@ Future<CommandOutput> runCommandPubkey({
   command: command,
 );
 
-/// Open a long-lived shell over SSH with a PTY. Returns a session id; subscribe
-/// to output by calling `shell_output_stream(session_id)`.
 Future<BigInt> openShellPubkey({
   required String host,
   required int port,
@@ -45,20 +44,18 @@ Future<BigInt> openShellPubkey({
   rows: rows,
 );
 
-/// Stream of bytes coming out of the remote shell (stdout + stderr merged).
-/// Call this exactly once per session, immediately after `open_shell_pubkey`.
-/// The stream ends when the SSH session closes.
-Stream<Uint8List> shellOutputStream({required BigInt sessionId}) =>
+/// Stream of terminal snapshots. Bytes from the SSH session are fed into a
+/// per-call `vt100::Parser`, and after each chunk a fresh `TerminalSnapshot`
+/// is pushed to the sink. Call this exactly once per session.
+Stream<TerminalSnapshot> shellOutputStream({required BigInt sessionId}) =>
     RustLib.instance.api.crateApiSshShellOutputStream(sessionId: sessionId);
 
-/// Write input bytes (typed characters, \r, control codes) to a shell.
 Future<void> shellWrite({required BigInt sessionId, required List<int> data}) =>
     RustLib.instance.api.crateApiSshShellWrite(
       sessionId: sessionId,
       data: data,
     );
 
-/// Tell the remote PTY the terminal was resized.
 Future<void> shellResize({
   required BigInt sessionId,
   required int cols,
@@ -69,7 +66,6 @@ Future<void> shellResize({
   rows: rows,
 );
 
-/// Close a shell session. Idempotent.
 Future<void> shellClose({required BigInt sessionId}) =>
     RustLib.instance.api.crateApiSshShellClose(sessionId: sessionId);
 
@@ -95,4 +91,44 @@ class CommandOutput {
           exitCode == other.exitCode &&
           stdout == other.stdout &&
           stderr == other.stderr;
+}
+
+/// One frame of terminal state, ready to be rendered as monospace text.
+class TerminalSnapshot {
+  final int rows;
+  final int cols;
+  final String text;
+  final int cursorRow;
+  final int cursorCol;
+  final bool cursorVisible;
+
+  const TerminalSnapshot({
+    required this.rows,
+    required this.cols,
+    required this.text,
+    required this.cursorRow,
+    required this.cursorCol,
+    required this.cursorVisible,
+  });
+
+  @override
+  int get hashCode =>
+      rows.hashCode ^
+      cols.hashCode ^
+      text.hashCode ^
+      cursorRow.hashCode ^
+      cursorCol.hashCode ^
+      cursorVisible.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TerminalSnapshot &&
+          runtimeType == other.runtimeType &&
+          rows == other.rows &&
+          cols == other.cols &&
+          text == other.text &&
+          cursorRow == other.cursorRow &&
+          cursorCol == other.cursorCol &&
+          cursorVisible == other.cursorVisible;
 }

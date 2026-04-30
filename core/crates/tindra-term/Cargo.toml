@@ -13,5 +13,6 @@ publish.workspace = true
 thiserror.workspace = true
 tracing.workspace   = true
 serde.workspace     = true
+vt100.workspace     = true
 
 # alacritty_terminal = { workspace = true }

@@ -51,7 +51,7 @@ russh = "0.45"
 
 # Terminal
 # alacritty_terminal = "0.22"
-# vt100              = "0.15"
+vt100              = "0.16"
 
 # Storage
 # rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }

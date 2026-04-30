@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tindra desktop — Phase 1.1 interactive shell.
-// Connect form on the left, live terminal on the right with line-buffered
-// input. No VT/ANSI parsing yet — escape sequences will appear as raw
-// characters until Phase 1.2 wires up `alacritty_terminal`.
+// Tindra desktop — Phase 1.2 VT-parsed terminal.
+// The Rust side feeds raw SSH output into a vt100 Parser and emits screen
+// snapshots. The UI renders the snapshot's plain-text grid in a monospace
+// box and overlays a cursor block at (cursorRow, cursorCol).
 
 import 'dart:async';
 import 'dart:convert';
@@ -66,22 +66,21 @@ class _ShellScreenState extends State<ShellScreen> {
       TextEditingController(text: r'C:\Users\XIU\.ssh\id_ed25519');
   final _passphrase = TextEditingController();
   final _input = TextEditingController();
-  final _scroll = ScrollController();
   final _inputFocus = FocusNode();
 
   _ConnState _state = _ConnState.disconnected;
   BigInt? _sessionId;
-  StreamSubscription<Uint8List>? _outputSub;
-  String _output = '';
+  StreamSubscription<TerminalSnapshot>? _outputSub;
+  TerminalSnapshot? _snapshot;
   String? _error;
 
-  // UTF-8 streaming decoder (handles bytes split across chunks).
-  final _decoder = const Utf8Decoder(allowMalformed: true);
+  static const int _cols = 120;
+  static const int _rows = 32;
 
   Future<void> _connect() async {
     setState(() {
       _state = _ConnState.connecting;
-      _output = '';
+      _snapshot = null;
       _error = null;
     });
     try {
@@ -91,25 +90,12 @@ class _ShellScreenState extends State<ShellScreen> {
         username: _user.text.trim(),
         privateKeyPath: _keyPath.text.trim(),
         passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
-        cols: 120,
-        rows: 32,
+        cols: _cols,
+        rows: _rows,
       );
       _sessionId = id;
       _outputSub = shellOutputStream(sessionId: id).listen(
-        (bytes) {
-          // Decode each chunk and append. Auto-scroll on next frame.
-          final text = _decoder.convert(bytes);
-          setState(() => _output += text);
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scroll.hasClients) {
-              _scroll.animateTo(
-                _scroll.position.maxScrollExtent,
-                duration: const Duration(milliseconds: 50),
-                curve: Curves.easeOut,
-              );
-            }
-          });
-        },
+        (snap) => setState(() => _snapshot = snap),
         onError: (e) {
           setState(() {
             _error = e.toString();
@@ -121,7 +107,6 @@ class _ShellScreenState extends State<ShellScreen> {
         },
       );
       setState(() => _state = _ConnState.connected);
-      // Move keyboard focus into the terminal input.
       _inputFocus.requestFocus();
     } catch (e) {
       setState(() {
@@ -159,7 +144,6 @@ class _ShellScreenState extends State<ShellScreen> {
   Future<void> _sendCtrl(String key) async {
     final id = _sessionId;
     if (id == null) return;
-    // Ctrl+key → ASCII control code (e.g. C=3, D=4, L=12, Z=26).
     final upper = key.toUpperCase().codeUnitAt(0);
     if (upper < 0x40 || upper > 0x5F) return;
     final code = upper - 0x40;
@@ -175,7 +159,6 @@ class _ShellScreenState extends State<ShellScreen> {
     for (final c in [_host, _port, _user, _keyPath, _passphrase, _input]) {
       c.dispose();
     }
-    _scroll.dispose();
     _inputFocus.dispose();
     super.dispose();
   }
@@ -186,7 +169,7 @@ class _ShellScreenState extends State<ShellScreen> {
       appBar: AppBar(
         title: Text(_state == _ConnState.connected
             ? 'Tindra · ${_user.text}@${_host.text}'
-            : 'Tindra · Phase 1.1 — interactive shell'),
+            : 'Tindra · Phase 1.2 — VT-parsed terminal'),
         backgroundColor: const Color(0xFF161A22),
       ),
       body: Padding(
@@ -262,6 +245,20 @@ class _ShellScreenState extends State<ShellScreen> {
             ),
           ),
         const SizedBox(height: 12),
+        if (_snapshot != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              'grid: ${_snapshot!.cols}×${_snapshot!.rows}    '
+              'cursor: (${_snapshot!.cursorRow},${_snapshot!.cursorCol})',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Color(0xFF8AA0B5),
+                fontFamily: 'Consolas',
+              ),
+            ),
+          ),
+        const SizedBox(height: 12),
         if (_error != null)
           Container(
             decoration: BoxDecoration(
@@ -296,24 +293,7 @@ class _ShellScreenState extends State<ShellScreen> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(10),
-              child: Scrollbar(
-                controller: _scroll,
-                thumbVisibility: true,
-                child: SingleChildScrollView(
-                  controller: _scroll,
-                  child: SelectableText(
-                    _output.isEmpty && _state != _ConnState.connected
-                        ? '(not connected)'
-                        : _output,
-                    style: const TextStyle(
-                      fontFamily: 'Consolas',
-                      fontSize: 13,
-                      height: 1.35,
-                      color: Color(0xFFE3E9F1),
-                    ),
-                  ),
-                ),
-              ),
+              child: _TerminalGrid(snapshot: _snapshot, isConnected: _state == _ConnState.connected),
             ),
           ),
           Container(
@@ -374,6 +354,75 @@ class _ShellScreenState extends State<ShellScreen> {
               ),
             ]),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Renders a TerminalSnapshot as a fixed-grid monospace box with a cursor
+/// overlay. Glyph metrics are measured per build using a TextPainter so the
+/// cursor lines up regardless of OS font rendering.
+class _TerminalGrid extends StatelessWidget {
+  const _TerminalGrid({required this.snapshot, required this.isConnected});
+  final TerminalSnapshot? snapshot;
+  final bool isConnected;
+
+  static const TextStyle _style = TextStyle(
+    fontFamily: 'Consolas',
+    fontSize: 13,
+    height: 1.35,
+    color: Color(0xFFE3E9F1),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    if (snapshot == null) {
+      return Center(
+        child: Text(
+          isConnected ? 'waiting for first chunk…' : '(not connected)',
+          style: TextStyle(color: Colors.grey.shade500),
+        ),
+      );
+    }
+    final s = snapshot!;
+    // Measure char width and line height with a one-shot TextPainter on a
+    // representative monospace glyph. Reasonably stable across rebuilds
+    // because the style is const.
+    final probe = TextPainter(
+      text: const TextSpan(text: 'M', style: _style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final charWidth = probe.width;
+    final lineHeight = probe.height;
+    probe.dispose();
+
+    return SingleChildScrollView(
+      child: Stack(
+        children: [
+          // Use SelectableText so users can copy-paste output, but with a
+          // hard `softWrap: false` and a fixed-width pad so cursor math
+          // stays correct.
+          SelectableText(
+            s.text,
+            style: _style,
+            maxLines: null,
+          ),
+          if (s.cursorVisible)
+            Positioned(
+              left: s.cursorCol * charWidth,
+              top: s.cursorRow * lineHeight,
+              width: charWidth,
+              height: lineHeight,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF7AC0FF).withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
