@@ -4,6 +4,8 @@
 // This crate re-exports the high-level types that flutter_rust_bridge
 // codegens to Dart. It is the only crate the bridge sees.
 
+pub mod api;
+
 pub use tindra_ssh as ssh;
 pub use tindra_pty as pty;
 pub use tindra_sftp as sftp;

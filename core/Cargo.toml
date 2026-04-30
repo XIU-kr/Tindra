@@ -64,7 +64,7 @@ toml = "0.8"
 # wasmtime = "23"
 
 # FFI
-# flutter_rust_bridge = "2"
+flutter_rust_bridge = "2"
 
 [profile.release]
 lto = "thin"

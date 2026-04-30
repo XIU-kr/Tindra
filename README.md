@@ -45,7 +45,10 @@ docs/             Architecture, security model, plugin SDK
 
 ## Building
 
-Toolchain prerequisites are documented in [`scripts/SETUP.md`](scripts/SETUP.md). TL;DR you need Rust (stable), Flutter (stable), and Android NDK if targeting mobile.
+- **Windows-only quickstart** (skip Android/iOS/Linux/macOS): [`scripts/SETUP-WINDOWS.md`](scripts/SETUP-WINDOWS.md)
+- **Full multi-platform setup**: [`scripts/SETUP.md`](scripts/SETUP.md)
+
+TL;DR you need Rust (stable), Flutter (stable), and a C++ toolchain. Android NDK and Xcode only when targeting those platforms.
 
 ```bash
 # After installing toolchains
