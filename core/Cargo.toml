@@ -55,6 +55,7 @@ vt100              = "0.16"
 
 # Storage
 # rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
+dirs = "5"
 
 # Sync
 # automerge = "0.5"

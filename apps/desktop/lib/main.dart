@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tindra desktop — Phase 1.3 colored, raw-keystroke, auto-resizing terminal.
-// The Rust side feeds raw SSH output through a vt100 Parser and emits per-cell
-// snapshots (text + fg/bg/attrs). The UI renders those cells as a coalesced
-// Text.rich grid, captures every keystroke as raw bytes, and tracks the
-// terminal pane's dimensions to push shell_resize on window changes.
+// Tindra desktop — Phase 2 with profile manager.
+// Saved connection profiles live in <data_dir>/Tindra/profiles.json. The
+// left panel shows the profile list; the right panel is the terminal view
+// from Phase 1.3 (cell grid + raw keystrokes + auto-resize).
 
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/ssh.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
@@ -69,37 +69,119 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen> {
-  final _host = TextEditingController(text: 'localhost');
-  final _port = TextEditingController(text: '22');
-  final _user = TextEditingController(text: 'XIU');
-  final _keyPath =
-      TextEditingController(text: r'C:\Users\XIU\.ssh\id_ed25519');
   final _passphrase = TextEditingController();
   final _termFocus = FocusNode(debugLabel: 'terminal');
 
+  // Profile state
+  List<rust.Profile> _profiles = [];
+  String? _selectedId;
+  bool _profilesLoading = true;
+
+  // Connection state
   _ConnState _state = _ConnState.disconnected;
   BigInt? _sessionId;
+  String? _activeProfileName; // for AppBar display while connected
   StreamSubscription<rust.TerminalSnapshot>? _outputSub;
   rust.TerminalSnapshot? _snapshot;
   String? _error;
 
-  // Geometry tracking. _cols/_rows is the size last reported to the remote PTY.
+  // Geometry tracking (cols/rows last reported to remote PTY).
   int _cols = 120;
   int _rows = 32;
   Timer? _resizeDebounce;
 
+  rust.Profile? get _selected =>
+      _profiles.where((p) => p.id == _selectedId).firstOrNull;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshProfiles();
+  }
+
+  Future<void> _refreshProfiles() async {
+    try {
+      final list = await rust.listProfiles();
+      setState(() {
+        _profiles = list;
+        _profilesLoading = false;
+        if (_selectedId == null && list.isNotEmpty) {
+          _selectedId = list.first.id;
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _profilesLoading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _openProfileDialog({rust.Profile? existing}) async {
+    final result = await showDialog<rust.Profile>(
+      context: context,
+      builder: (_) => _ProfileDialog(initial: existing),
+    );
+    if (result == null) return;
+    try {
+      final saved = await rust.upsertProfile(profile: result);
+      await _refreshProfiles();
+      setState(() => _selectedId = saved.id);
+    } catch (e) {
+      setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _deleteProfile(rust.Profile profile) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete profile?'),
+        content: Text('Permanently remove "${profile.name}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8B2C2C),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await rust.deleteProfile(id: profile.id);
+      await _refreshProfiles();
+      setState(() {
+        if (_selectedId == profile.id) {
+          _selectedId = _profiles.isEmpty ? null : _profiles.first.id;
+        }
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
+    }
+  }
+
   Future<void> _connect() async {
+    final p = _selected;
+    if (p == null) return;
     setState(() {
       _state = _ConnState.connecting;
       _snapshot = null;
       _error = null;
+      _activeProfileName = p.name;
     });
     try {
       final id = await rust.openShellPubkey(
-        host: _host.text.trim(),
-        port: int.parse(_port.text.trim()),
-        username: _user.text.trim(),
-        privateKeyPath: _keyPath.text.trim(),
+        host: p.host,
+        port: p.port,
+        username: p.username,
+        privateKeyPath: p.privateKeyPath,
         passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
         cols: _cols,
         rows: _rows,
@@ -118,11 +200,13 @@ class _ShellScreenState extends State<ShellScreen> {
         },
       );
       setState(() => _state = _ConnState.connected);
+      _passphrase.clear();
       _termFocus.requestFocus();
     } catch (e) {
       setState(() {
         _error = e.toString();
         _state = _ConnState.disconnected;
+        _activeProfileName = null;
       });
     }
   }
@@ -136,6 +220,7 @@ class _ShellScreenState extends State<ShellScreen> {
     setState(() {
       _sessionId = null;
       _state = _ConnState.disconnected;
+      _activeProfileName = null;
     });
   }
 
@@ -150,14 +235,12 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   /// Convert a Flutter key event to the byte sequence a Unix-like PTY expects.
-  /// Returns null if the event isn't ours to handle.
   List<int>? _keyEventToBytes(KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return null;
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     final alt = HardwareKeyboard.instance.isAltPressed;
     final logical = event.logicalKey;
 
-    // Named keys with canonical xterm sequences.
     String? esc;
     if (logical == LogicalKeyboardKey.arrowUp) {
       esc = '\x1b[A';
@@ -214,7 +297,6 @@ class _ShellScreenState extends State<ShellScreen> {
     }
     if (esc != null) return utf8.encode(esc);
 
-    // Ctrl+letter → ASCII control code (Ctrl+A=1, ..., Ctrl+Z=26).
     if (ctrl) {
       final ch = event.character;
       if (ch != null && ch.isNotEmpty) {
@@ -224,16 +306,12 @@ class _ShellScreenState extends State<ShellScreen> {
         }
       }
     }
-
-    // Alt+char → ESC + char.
     if (alt) {
       final ch = event.character;
       if (ch != null && ch.isNotEmpty) {
         return [0x1b, ...utf8.encode(ch)];
       }
     }
-
-    // Plain printable character (already accounts for Shift).
     final ch = event.character;
     if (ch != null && ch.isNotEmpty) {
       return utf8.encode(ch);
@@ -251,8 +329,6 @@ class _ShellScreenState extends State<ShellScreen> {
     return KeyEventResult.ignored;
   }
 
-  /// Schedule a resize push to the remote PTY when the visible grid changes.
-  /// Debounced so dragging the window doesn't spam the server.
   void _scheduleResize(int cols, int rows) {
     if (cols == _cols && rows == _rows) return;
     _resizeDebounce?.cancel();
@@ -272,9 +348,7 @@ class _ShellScreenState extends State<ShellScreen> {
     if (_sessionId != null) {
       rust.shellClose(sessionId: _sessionId!);
     }
-    for (final c in [_host, _port, _user, _keyPath, _passphrase]) {
-      c.dispose();
-    }
+    _passphrase.dispose();
     _termFocus.dispose();
     super.dispose();
   }
@@ -284,8 +358,8 @@ class _ShellScreenState extends State<ShellScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_state == _ConnState.connected
-            ? 'Tindra · ${_user.text}@${_host.text}'
-            : 'Tindra · Phase 1.3'),
+            ? 'Tindra · ${_activeProfileName ?? "session"}'
+            : 'Tindra'),
         backgroundColor: const Color(0xFF161A22),
       ),
       body: Padding(
@@ -293,7 +367,7 @@ class _ShellScreenState extends State<ShellScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(width: 320, child: _connectionPanel()),
+            SizedBox(width: 280, child: _sidePanel()),
             const SizedBox(width: 12),
             Expanded(child: _terminalPanel()),
           ],
@@ -302,66 +376,61 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 
-  Widget _connectionPanel() {
-    final disabled = _state != _ConnState.disconnected;
+  Widget _sidePanel() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Field(label: 'Host', controller: _host, enabled: !disabled),
-        Row(children: [
-          Expanded(
-              child: _Field(
-                  label: 'User', controller: _user, enabled: !disabled)),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 90,
-            child:
-                _Field(label: 'Port', controller: _port, enabled: !disabled),
-          ),
-        ]),
-        _Field(
-          label: 'Private key path',
-          controller: _keyPath,
-          enabled: !disabled,
+        Row(
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                'Profiles',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF8AA0B5),
+                ),
+              ),
+            ),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.add, size: 20),
+              tooltip: 'New profile',
+              onPressed: _state == _ConnState.disconnected
+                  ? () => _openProfileDialog()
+                  : null,
+            ),
+          ],
         ),
-        _Field(
-          label: 'Passphrase (optional)',
-          controller: _passphrase,
-          enabled: !disabled,
-          obscure: true,
-        ),
-        const SizedBox(height: 8),
-        if (_state == _ConnState.disconnected)
-          FilledButton.icon(
-            onPressed: _connect,
-            icon: const Icon(Icons.link),
-            label: const Text('Connect'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF161A22),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFF1F2937)),
             ),
-          )
-        else if (_state == _ConnState.connecting)
-          FilledButton.icon(
-            onPressed: null,
-            icon: const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            label: const Text('Connecting…'),
-          )
-        else
-          FilledButton.icon(
-            onPressed: _disconnect,
-            icon: const Icon(Icons.link_off),
-            label: const Text('Disconnect'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF8B2C2C),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
+            child: _profilesLoading
+                ? const Center(
+                    child:
+                        SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                : _profiles.isEmpty
+                    ? _emptyState()
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: _profiles.length,
+                        itemBuilder: (_, i) =>
+                            _profileTile(_profiles[i]),
+                      ),
           ),
-        const SizedBox(height: 12),
-        if (_snapshot != null)
+        ),
+        if (_selected != null) ...[
+          const SizedBox(height: 10),
+          _connectionActions(_selected!),
+        ],
+        const SizedBox(height: 10),
+        if (_snapshot != null && _state == _ConnState.connected)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
@@ -374,8 +443,8 @@ class _ShellScreenState extends State<ShellScreen> {
               ),
             ),
           ),
-        const SizedBox(height: 12),
-        if (_error != null)
+        if (_error != null) ...[
+          const SizedBox(height: 10),
           Container(
             decoration: BoxDecoration(
               color: const Color(0xFF2A1417),
@@ -383,15 +452,165 @@ class _ShellScreenState extends State<ShellScreen> {
               borderRadius: BorderRadius.circular(6),
             ),
             padding: const EdgeInsets.all(10),
-            child: Text(
-              _error!,
-              style: const TextStyle(
-                color: Color(0xFFFFB4B4),
-                fontFamily: 'Consolas',
-                fontSize: 12,
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Color(0xFFFFB4B4),
+                    fontFamily: 'Consolas',
+                    fontSize: 12,
+                  ),
+                ),
               ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 16),
+                onPressed: () => setState(() => _error = null),
+              ),
+            ]),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.dns_outlined,
+                size: 36, color: Color(0xFF8AA0B5)),
+            const SizedBox(height: 8),
+            const Text(
+              'No profiles yet',
+              style: TextStyle(color: Color(0xFF8AA0B5)),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: () => _openProfileDialog(),
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Create one'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _profileTile(rust.Profile p) {
+    final selected = p.id == _selectedId;
+    return InkWell(
+      onTap: _state == _ConnState.disconnected
+          ? () => setState(() => _selectedId = p.id)
+          : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF1B2030) : null,
+          border: Border(
+            left: BorderSide(
+              color: selected
+                  ? const Color(0xFF7AC0FF)
+                  : Colors.transparent,
+              width: 3,
             ),
           ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              p.name.isEmpty ? '(unnamed)' : p.name,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${p.username}@${p.host}${p.port == 22 ? "" : ":${p.port}"}',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Color(0xFF8AA0B5),
+                fontFamily: 'Consolas',
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _connectionActions(rust.Profile p) {
+    if (_state == _ConnState.connected) {
+      return FilledButton.icon(
+        onPressed: _disconnect,
+        icon: const Icon(Icons.link_off),
+        label: const Text('Disconnect'),
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFF8B2C2C),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _passphrase,
+              obscureText: true,
+              enabled: _state == _ConnState.disconnected,
+              decoration: const InputDecoration(
+                hintText: 'Key passphrase (if any)',
+                hintStyle: TextStyle(fontSize: 12),
+              ),
+              style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        if (_state == _ConnState.connecting)
+          FilledButton.icon(
+            onPressed: null,
+            icon: const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            label: const Text('Connecting…'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: _connect,
+            icon: const Icon(Icons.link),
+            label: Text('Connect to ${p.name}'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () => _openProfileDialog(existing: p),
+              icon: const Icon(Icons.edit, size: 16),
+              label: const Text('Edit'),
+            ),
+          ),
+          const SizedBox(width: 6),
+          IconButton.outlined(
+            tooltip: 'Delete',
+            icon: const Icon(Icons.delete_outline, size: 18),
+            onPressed: () => _deleteProfile(p),
+          ),
+        ]),
       ],
     );
   }
@@ -436,7 +655,7 @@ class _ShellScreenState extends State<ShellScreen> {
                   padding: const EdgeInsets.all(padding),
                   child: _CellGrid(
                     snapshot: _snapshot,
-                    isConnected: _state == _ConnState.connected,
+                    state: _state,
                     isFocused: _termFocus.hasFocus,
                     charWidth: charWidth,
                     lineHeight: lineHeight,
@@ -451,21 +670,17 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 }
 
-/// Renders a TerminalSnapshot as a coalesced Text.rich grid plus a cursor
-/// overlay. Adjacent cells with identical fg/bg/attrs are merged into a
-/// single TextSpan so the widget tree stays small (typically a few dozen
-/// spans even on busy screens).
 class _CellGrid extends StatelessWidget {
   const _CellGrid({
     required this.snapshot,
-    required this.isConnected,
+    required this.state,
     required this.isFocused,
     required this.charWidth,
     required this.lineHeight,
   });
 
   final rust.TerminalSnapshot? snapshot;
-  final bool isConnected;
+  final _ConnState state;
   final bool isFocused;
   final double charWidth;
   final double lineHeight;
@@ -475,7 +690,11 @@ class _CellGrid extends StatelessWidget {
     if (snapshot == null) {
       return Center(
         child: Text(
-          isConnected ? 'waiting for first chunk…' : '(not connected)',
+          state == _ConnState.connected
+              ? 'waiting for first chunk…'
+              : state == _ConnState.connecting
+                  ? 'connecting…'
+                  : 'Pick a profile on the left, then Connect.',
           style: TextStyle(color: Colors.grey.shade500),
         ),
       );
@@ -533,13 +752,12 @@ class _CellGrid extends StatelessWidget {
 
     final cols = s.cols;
     final rows = s.rows;
-
     for (int row = 0; row < rows; row++) {
       for (int col = 0; col < cols; col++) {
         final idx = row * cols + col;
         if (idx >= s.cells.length) break;
         final cell = s.cells[idx];
-        if (cell.ch.isEmpty) continue; // wide-character continuation cell
+        if (cell.ch.isEmpty) continue;
         final style = _styleForCell(cell);
         if (style != curStyle) {
           flush();
@@ -580,20 +798,102 @@ TextStyle _styleForCell(rust.Cell c) {
   );
 }
 
-class _Field extends StatelessWidget {
-  const _Field({
-    required this.label,
-    required this.controller,
-    this.obscure = false,
-    this.enabled = true,
-  });
-  final String label;
-  final TextEditingController controller;
-  final bool obscure;
-  final bool enabled;
+class _ProfileDialog extends StatefulWidget {
+  const _ProfileDialog({this.initial});
+  final rust.Profile? initial;
+
+  @override
+  State<_ProfileDialog> createState() => _ProfileDialogState();
+}
+
+class _ProfileDialogState extends State<_ProfileDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _host;
+  late final TextEditingController _port;
+  late final TextEditingController _user;
+  late final TextEditingController _key;
+  late final TextEditingController _notes;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.initial;
+    _name = TextEditingController(text: p?.name ?? '');
+    _host = TextEditingController(text: p?.host ?? '');
+    _port = TextEditingController(text: (p?.port ?? 22).toString());
+    _user = TextEditingController(text: p?.username ?? '');
+    _key = TextEditingController(
+        text: p?.privateKeyPath ?? r'C:\Users\XIU\.ssh\id_ed25519');
+    _notes = TextEditingController(text: p?.notes ?? '');
+  }
+
+  @override
+  void dispose() {
+    for (final c in [_name, _host, _port, _user, _key, _notes]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _save() {
+    final port = int.tryParse(_port.text.trim()) ?? 22;
+    final p = rust.Profile(
+      id: widget.initial?.id ?? '',
+      name: _name.text.trim().isEmpty
+          ? '${_user.text.trim()}@${_host.text.trim()}'
+          : _name.text.trim(),
+      host: _host.text.trim(),
+      port: port,
+      username: _user.text.trim(),
+      privateKeyPath: _key.text.trim(),
+      notes: _notes.text,
+    );
+    Navigator.pop(context, p);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isNew = widget.initial == null;
+    return AlertDialog(
+      backgroundColor: const Color(0xFF161A22),
+      title: Text(isNew ? 'New profile' : 'Edit profile'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _row('Name', _name, hint: 'e.g. prod-web-1'),
+              _row('Host', _host, hint: 'localhost / 1.2.3.4 / dev.example.com'),
+              Row(children: [
+                Expanded(child: _row('User', _user, hint: 'XIU')),
+                const SizedBox(width: 8),
+                SizedBox(width: 100, child: _row('Port', _port)),
+              ]),
+              _row('Private key path', _key),
+              _row('Notes', _notes, hint: 'optional', maxLines: 2),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _host.text.trim().isEmpty || _user.text.trim().isEmpty
+              ? null
+              : _save,
+          child: Text(isNew ? 'Create' : 'Save'),
+        ),
+      ],
+    );
+  }
+
+  Widget _row(String label, TextEditingController c,
+      {String? hint, int maxLines = 1}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
@@ -603,20 +903,22 @@ class _Field extends StatelessWidget {
             padding: const EdgeInsets.only(left: 4, bottom: 4),
             child: Text(
               label,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF8AA0B5),
-              ),
+              style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5)),
             ),
           ),
           TextField(
-            controller: controller,
-            obscureText: obscure,
-            enabled: enabled,
+            controller: c,
+            maxLines: maxLines,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(hintText: hint),
             style: const TextStyle(fontFamily: 'Consolas', fontSize: 13),
           ),
         ],
       ),
     );
   }
+}
+
+extension<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }
