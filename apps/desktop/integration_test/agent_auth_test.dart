@@ -34,6 +34,13 @@ void main() {
         username: 'XIU',
         cols: 120,
         rows: 32,
+        jump: const rust.JumpHost(
+          host: '',
+          port: 22,
+          username: '',
+          privateKeyPath: '',
+          passphrase: null,
+        ),
       );
     } catch (e) {
       error = e.toString();

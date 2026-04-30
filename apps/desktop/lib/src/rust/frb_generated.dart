@@ -96,6 +96,7 @@ abstract class RustLibApi extends BaseApi {
     required String username,
     required int cols,
     required int rows,
+    required JumpHost jump,
   });
 
   Future<BigInt> crateApiSshOpenShellPubkey({
@@ -106,6 +107,7 @@ abstract class RustLibApi extends BaseApi {
     String? passphrase,
     required int cols,
     required int rows,
+    required JumpHost jump,
   });
 
   Future<String> crateApiProfilesProfilesPath();
@@ -281,6 +283,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String username,
     required int cols,
     required int rows,
+    required JumpHost jump,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -291,6 +294,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(username, serializer);
           sse_encode_u_32(cols, serializer);
           sse_encode_u_32(rows, serializer);
+          sse_encode_box_autoadd_jump_host(jump, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -303,7 +307,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSshOpenShellAgentConstMeta,
-        argValues: [host, port, username, cols, rows],
+        argValues: [host, port, username, cols, rows, jump],
         apiImpl: this,
       ),
     );
@@ -311,7 +315,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSshOpenShellAgentConstMeta => const TaskConstMeta(
     debugName: "open_shell_agent",
-    argNames: ["host", "port", "username", "cols", "rows"],
+    argNames: ["host", "port", "username", "cols", "rows", "jump"],
   );
 
   @override
@@ -323,6 +327,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     String? passphrase,
     required int cols,
     required int rows,
+    required JumpHost jump,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -335,6 +340,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_opt_String(passphrase, serializer);
           sse_encode_u_32(cols, serializer);
           sse_encode_u_32(rows, serializer);
+          sse_encode_box_autoadd_jump_host(jump, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -355,6 +361,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           passphrase,
           cols,
           rows,
+          jump,
         ],
         apiImpl: this,
       ),
@@ -371,6 +378,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "passphrase",
       "cols",
       "rows",
+      "jump",
     ],
   );
 
@@ -642,6 +650,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  JumpHost dco_decode_box_autoadd_jump_host(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_jump_host(raw);
+  }
+
+  @protected
   Profile dco_decode_box_autoadd_profile(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_profile(raw);
@@ -695,6 +709,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  JumpHost dco_decode_jump_host(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return JumpHost(
+      host: dco_decode_String(arr[0]),
+      port: dco_decode_u_16(arr[1]),
+      username: dco_decode_String(arr[2]),
+      privateKeyPath: dco_decode_String(arr[3]),
+      passphrase: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
   List<Cell> dco_decode_list_cell(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_cell).toList();
@@ -728,8 +757,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Profile dco_decode_profile(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return Profile(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
@@ -739,6 +768,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       privateKeyPath: dco_decode_String(arr[5]),
       notes: dco_decode_String(arr[6]),
       authMethod: dco_decode_String(arr[7]),
+      jumpHost: dco_decode_String(arr[8]),
+      jumpPort: dco_decode_u_16(arr[9]),
+      jumpUsername: dco_decode_String(arr[10]),
+      jumpPrivateKeyPath: dco_decode_String(arr[11]),
     );
   }
 
@@ -818,6 +851,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  JumpHost sse_decode_box_autoadd_jump_host(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_jump_host(deserializer));
+  }
+
+  @protected
   Profile sse_decode_box_autoadd_profile(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_profile(deserializer));
@@ -860,6 +899,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
+  }
+
+  @protected
+  JumpHost sse_decode_jump_host(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_host = sse_decode_String(deserializer);
+    var var_port = sse_decode_u_16(deserializer);
+    var var_username = sse_decode_String(deserializer);
+    var var_privateKeyPath = sse_decode_String(deserializer);
+    var var_passphrase = sse_decode_opt_String(deserializer);
+    return JumpHost(
+      host: var_host,
+      port: var_port,
+      username: var_username,
+      privateKeyPath: var_privateKeyPath,
+      passphrase: var_passphrase,
+    );
   }
 
   @protected
@@ -922,6 +978,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_privateKeyPath = sse_decode_String(deserializer);
     var var_notes = sse_decode_String(deserializer);
     var var_authMethod = sse_decode_String(deserializer);
+    var var_jumpHost = sse_decode_String(deserializer);
+    var var_jumpPort = sse_decode_u_16(deserializer);
+    var var_jumpUsername = sse_decode_String(deserializer);
+    var var_jumpPrivateKeyPath = sse_decode_String(deserializer);
     return Profile(
       id: var_id,
       name: var_name,
@@ -931,6 +991,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       privateKeyPath: var_privateKeyPath,
       notes: var_notes,
       authMethod: var_authMethod,
+      jumpHost: var_jumpHost,
+      jumpPort: var_jumpPort,
+      jumpUsername: var_jumpUsername,
+      jumpPrivateKeyPath: var_jumpPrivateKeyPath,
     );
   }
 
@@ -1023,6 +1087,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_jump_host(
+    JumpHost self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_jump_host(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_profile(Profile self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_profile(self, serializer);
@@ -1058,6 +1131,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
+  }
+
+  @protected
+  void sse_encode_jump_host(JumpHost self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.host, serializer);
+    sse_encode_u_16(self.port, serializer);
+    sse_encode_String(self.username, serializer);
+    sse_encode_String(self.privateKeyPath, serializer);
+    sse_encode_opt_String(self.passphrase, serializer);
   }
 
   @protected
@@ -1121,6 +1204,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.privateKeyPath, serializer);
     sse_encode_String(self.notes, serializer);
     sse_encode_String(self.authMethod, serializer);
+    sse_encode_String(self.jumpHost, serializer);
+    sse_encode_u_16(self.jumpPort, serializer);
+    sse_encode_String(self.jumpUsername, serializer);
+    sse_encode_String(self.jumpPrivateKeyPath, serializer);
   }
 
   @protected

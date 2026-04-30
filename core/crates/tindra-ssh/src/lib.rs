@@ -112,6 +112,50 @@ pub async fn run_command_pubkey(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 4.1 — jump host (proxy via direct-tcpip)
+// ---------------------------------------------------------------------------
+
+/// One hop in a jump-host chain. The current implementation supports a
+/// single hop. Authentication is private-key only — a future revision may
+/// allow agent-based jump auth.
+#[derive(Debug, Clone)]
+pub struct JumpParams {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub private_key_path: PathBuf,
+    pub passphrase: Option<String>,
+}
+
+/// Open an SSH connection through a jump host. The jump session must stay
+/// alive for as long as the target session — the caller is responsible for
+/// keeping the returned `(jump_handle, target_handle)` together.
+async fn connect_via_jump(
+    jump: JumpParams,
+    target_host: String,
+    target_port: u16,
+    config: Arc<client::Config>,
+) -> Result<(Handle<TofuHandler>, Handle<TofuHandler>), SshError> {
+    let jump_key = russh::keys::load_secret_key(&jump.private_key_path, jump.passphrase.as_deref())?;
+    let mut jump_handle: Handle<TofuHandler> =
+        client::connect(config.clone(), (jump.host.as_str(), jump.port), TofuHandler).await?;
+    let authed = jump_handle
+        .authenticate_publickey(jump.username, Arc::new(jump_key))
+        .await?;
+    if !authed {
+        return Err(SshError::AuthFailed);
+    }
+
+    let channel = jump_handle
+        .channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0)
+        .await?;
+    let stream = channel.into_stream();
+    let target_handle: Handle<TofuHandler> =
+        client::connect_stream(config, stream, TofuHandler).await?;
+    Ok((jump_handle, target_handle))
+}
+
+// ---------------------------------------------------------------------------
 // Phase 1.1 — interactive shell session
 // ---------------------------------------------------------------------------
 
@@ -132,6 +176,9 @@ struct ActiveShell {
     /// Worker task owns the russh Handle and Channel; we keep its
     /// JoinHandle so it survives until the session is closed.
     _task: tokio::task::JoinHandle<()>,
+    /// When the connection went through a jump host, we keep its handle
+    /// alive here — dropping it tears down the proxied stream.
+    _jump_handle: Option<Handle<TofuHandler>>,
 }
 
 fn registry() -> &'static Mutex<HashMap<u64, ActiveShell>> {
@@ -147,10 +194,8 @@ fn next_session_id() -> u64 {
 /// Open an interactive shell session over SSH. Returns a session id used by
 /// `shell_write`, `shell_resize`, `shell_close`, and `take_output_receiver`.
 ///
-/// Output is buffered in an unbounded mpsc until the caller takes the
-/// receiver (typically from the bridge crate, which then pumps it into a
-/// Dart `Stream`). Buffering means a slow subscriber doesn't lose data,
-/// at the cost of unbounded memory if Dart never subscribes.
+/// `jump` makes the connection traverse a jump host via direct-tcpip; pass
+/// `None` for a direct connection.
 pub async fn open_shell_pubkey(
     host: String,
     port: u16,
@@ -159,16 +204,25 @@ pub async fn open_shell_pubkey(
     passphrase: Option<String>,
     cols: u32,
     rows: u32,
+    jump: Option<JumpParams>,
 ) -> Result<u64, SshError> {
-    let (output_tx, output_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let key_pair = russh::keys::load_secret_key(&private_key_path, passphrase.as_deref())?;
     let config = Arc::new(client::Config {
         inactivity_timeout: Some(Duration::from_secs(300)),
         ..Default::default()
     });
 
-    let mut handle: Handle<TofuHandler> =
-        client::connect(config, (host.as_str(), port), TofuHandler).await?;
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            None,
+        ),
+    };
+
     let authed = handle
         .authenticate_publickey(username, Arc::new(key_pair))
         .await?;
@@ -176,12 +230,24 @@ pub async fn open_shell_pubkey(
         return Err(SshError::AuthFailed);
     }
 
+    spawn_shell_worker(handle, jump_handle, cols, rows).await
+}
+
+/// Common tail of every open_shell_*: open a session channel, request PTY +
+/// shell, spawn the read/write select loop, and register the result.
+async fn spawn_shell_worker(
+    handle: Handle<TofuHandler>,
+    jump_handle: Option<Handle<TofuHandler>>,
+    cols: u32,
+    rows: u32,
+) -> Result<u64, SshError> {
     let mut channel = handle.channel_open_session().await?;
     channel
         .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
         .await?;
     channel.request_shell(false).await?;
 
+    let (output_tx, output_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let (write_tx, mut write_rx) = mpsc::unbounded_channel::<ShellCommand>();
     let id = next_session_id();
 
@@ -214,7 +280,6 @@ pub async fn open_shell_pubkey(
             }
         }
 
-        // Final marker so the UI can show "[disconnected]".
         let _ = output_tx.send(b"\r\n[connection closed]\r\n".to_vec());
         let _ = handle
             .disconnect(Disconnect::ByApplication, "", "en")
@@ -227,6 +292,7 @@ pub async fn open_shell_pubkey(
             write_tx,
             output_rx: Mutex::new(Some(output_rx)),
             _task: task,
+            _jump_handle: jump_handle,
         },
     );
     Ok(id)
@@ -299,69 +365,26 @@ pub async fn open_shell_agent(
     username: String,
     cols: u32,
     rows: u32,
+    jump: Option<JumpParams>,
 ) -> Result<u64, SshError> {
-    let (output_tx, output_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let config = Arc::new(client::Config {
         inactivity_timeout: Some(Duration::from_secs(300)),
         ..Default::default()
     });
 
-    let mut handle: Handle<TofuHandler> =
-        client::connect(config, (host.as_str(), port), TofuHandler).await?;
-    authenticate_via_agent(&mut handle, &username).await?;
-
-    let mut channel = handle.channel_open_session().await?;
-    channel
-        .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
-        .await?;
-    channel.request_shell(false).await?;
-
-    let (write_tx, mut write_rx) = mpsc::unbounded_channel::<ShellCommand>();
-    let id = next_session_id();
-
-    let task = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                msg = channel.wait() => {
-                    match msg {
-                        Some(ChannelMsg::Data { data }) => {
-                            if output_tx.send(data.to_vec()).is_err() { break; }
-                        }
-                        Some(ChannelMsg::ExtendedData { data, .. }) => {
-                            if output_tx.send(data.to_vec()).is_err() { break; }
-                        }
-                        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
-                        _ => {}
-                    }
-                }
-                Some(cmd) = write_rx.recv() => {
-                    match cmd {
-                        ShellCommand::Data(data) => {
-                            if channel.data(&data[..]).await.is_err() { break; }
-                        }
-                        ShellCommand::Resize { cols, rows } => {
-                            let _ = channel.window_change(cols, rows, 0, 0).await;
-                        }
-                        ShellCommand::Close => break,
-                    }
-                }
-            }
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config).await?;
+            (th, Some(jh))
         }
-        let _ = output_tx.send(b"\r\n[connection closed]\r\n".to_vec());
-        let _ = handle
-            .disconnect(Disconnect::ByApplication, "", "en")
-            .await;
-    });
+        None => (
+            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            None,
+        ),
+    };
 
-    registry().lock().await.insert(
-        id,
-        ActiveShell {
-            write_tx,
-            output_rx: Mutex::new(Some(output_rx)),
-            _task: task,
-        },
-    );
-    Ok(id)
+    authenticate_via_agent(&mut handle, &username).await?;
+    spawn_shell_worker(handle, jump_handle, cols, rows).await
 }
 
 /// Walks every identity the local agent advertises and tries each one against

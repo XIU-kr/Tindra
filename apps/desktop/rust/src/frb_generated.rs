@@ -237,6 +237,7 @@ fn wire__crate__api__ssh__open_shell_agent_impl(
             let api_username = <String>::sse_decode(&mut deserializer);
             let api_cols = <u32>::sse_decode(&mut deserializer);
             let api_rows = <u32>::sse_decode(&mut deserializer);
+            let api_jump = <crate::api::ssh::JumpHost>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
@@ -247,6 +248,7 @@ fn wire__crate__api__ssh__open_shell_agent_impl(
                             api_username,
                             api_cols,
                             api_rows,
+                            api_jump,
                         )
                         .await?;
                         Ok(output_ok)
@@ -286,6 +288,7 @@ fn wire__crate__api__ssh__open_shell_pubkey_impl(
             let api_passphrase = <Option<String>>::sse_decode(&mut deserializer);
             let api_cols = <u32>::sse_decode(&mut deserializer);
             let api_rows = <u32>::sse_decode(&mut deserializer);
+            let api_jump = <crate::api::ssh::JumpHost>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
@@ -298,6 +301,7 @@ fn wire__crate__api__ssh__open_shell_pubkey_impl(
                             api_passphrase,
                             api_cols,
                             api_rows,
+                            api_jump,
                         )
                         .await?;
                         Ok(output_ok)
@@ -672,6 +676,24 @@ impl SseDecode for i32 {
     }
 }
 
+impl SseDecode for crate::api::ssh::JumpHost {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_host = <String>::sse_decode(deserializer);
+        let mut var_port = <u16>::sse_decode(deserializer);
+        let mut var_username = <String>::sse_decode(deserializer);
+        let mut var_privateKeyPath = <String>::sse_decode(deserializer);
+        let mut var_passphrase = <Option<String>>::sse_decode(deserializer);
+        return crate::api::ssh::JumpHost {
+            host: var_host,
+            port: var_port,
+            username: var_username,
+            private_key_path: var_privateKeyPath,
+            passphrase: var_passphrase,
+        };
+    }
+}
+
 impl SseDecode for Vec<crate::api::ssh::Cell> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -730,6 +752,10 @@ impl SseDecode for crate::api::profiles::Profile {
         let mut var_privateKeyPath = <String>::sse_decode(deserializer);
         let mut var_notes = <String>::sse_decode(deserializer);
         let mut var_authMethod = <String>::sse_decode(deserializer);
+        let mut var_jumpHost = <String>::sse_decode(deserializer);
+        let mut var_jumpPort = <u16>::sse_decode(deserializer);
+        let mut var_jumpUsername = <String>::sse_decode(deserializer);
+        let mut var_jumpPrivateKeyPath = <String>::sse_decode(deserializer);
         return crate::api::profiles::Profile {
             id: var_id,
             name: var_name,
@@ -739,6 +765,10 @@ impl SseDecode for crate::api::profiles::Profile {
             private_key_path: var_privateKeyPath,
             notes: var_notes,
             auth_method: var_authMethod,
+            jump_host: var_jumpHost,
+            jump_port: var_jumpPort,
+            jump_username: var_jumpUsername,
+            jump_private_key_path: var_jumpPrivateKeyPath,
         };
     }
 }
@@ -898,6 +928,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::ssh::CommandOutput>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::ssh::JumpHost {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.host.into_into_dart().into_dart(),
+            self.port.into_into_dart().into_dart(),
+            self.username.into_into_dart().into_dart(),
+            self.private_key_path.into_into_dart().into_dart(),
+            self.passphrase.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::ssh::JumpHost {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::ssh::JumpHost> for crate::api::ssh::JumpHost {
+    fn into_into_dart(self) -> crate::api::ssh::JumpHost {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::profiles::Profile {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -909,6 +958,10 @@ impl flutter_rust_bridge::IntoDart for crate::api::profiles::Profile {
             self.private_key_path.into_into_dart().into_dart(),
             self.notes.into_into_dart().into_dart(),
             self.auth_method.into_into_dart().into_dart(),
+            self.jump_host.into_into_dart().into_dart(),
+            self.jump_port.into_into_dart().into_dart(),
+            self.jump_username.into_into_dart().into_dart(),
+            self.jump_private_key_path.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1014,6 +1067,17 @@ impl SseEncode for i32 {
     }
 }
 
+impl SseEncode for crate::api::ssh::JumpHost {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.host, serializer);
+        <u16>::sse_encode(self.port, serializer);
+        <String>::sse_encode(self.username, serializer);
+        <String>::sse_encode(self.private_key_path, serializer);
+        <Option<String>>::sse_encode(self.passphrase, serializer);
+    }
+}
+
 impl SseEncode for Vec<crate::api::ssh::Cell> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1065,6 +1129,10 @@ impl SseEncode for crate::api::profiles::Profile {
         <String>::sse_encode(self.private_key_path, serializer);
         <String>::sse_encode(self.notes, serializer);
         <String>::sse_encode(self.auth_method, serializer);
+        <String>::sse_encode(self.jump_host, serializer);
+        <u16>::sse_encode(self.jump_port, serializer);
+        <String>::sse_encode(self.jump_username, serializer);
+        <String>::sse_encode(self.jump_private_key_path, serializer);
     }
 }
 

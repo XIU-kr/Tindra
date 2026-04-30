@@ -129,6 +129,31 @@ fn meta_registry() -> &'static Mutex<HashMap<u64, SessionMeta>> {
     R.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// One hop in a jump chain. Empty `host` means "no jump" (sent that way
+/// because frb 2.x optional structs are awkward across the bridge).
+#[derive(Debug, Clone)]
+pub struct JumpHost {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub private_key_path: String,
+    pub passphrase: Option<String>,
+}
+
+fn jump_to_core(j: JumpHost) -> Option<tindra_core::ssh::JumpParams> {
+    if j.host.is_empty() {
+        None
+    } else {
+        Some(tindra_core::ssh::JumpParams {
+            host: j.host,
+            port: j.port,
+            username: j.username,
+            private_key_path: PathBuf::from(j.private_key_path),
+            passphrase: j.passphrase,
+        })
+    }
+}
+
 pub async fn open_shell_pubkey(
     host: String,
     port: u16,
@@ -137,6 +162,7 @@ pub async fn open_shell_pubkey(
     passphrase: Option<String>,
     cols: u32,
     rows: u32,
+    jump: JumpHost,
 ) -> Result<u64, String> {
     let id = tindra_core::ssh::open_shell_pubkey(
         host,
@@ -146,6 +172,7 @@ pub async fn open_shell_pubkey(
         passphrase,
         cols,
         rows,
+        jump_to_core(jump),
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -164,8 +191,9 @@ pub async fn open_shell_agent(
     username: String,
     cols: u32,
     rows: u32,
+    jump: JumpHost,
 ) -> Result<u64, String> {
-    let id = tindra_core::ssh::open_shell_agent(host, port, username, cols, rows)
+    let id = tindra_core::ssh::open_shell_agent(host, port, username, cols, rows, jump_to_core(jump))
         .await
         .map_err(|e| e.to_string())?;
     let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));

@@ -38,6 +38,12 @@ class Profile {
   /// "key" or "agent". Defaults to "key" when reading older profiles.
   final String authMethod;
 
+  /// Optional jump host. Empty `jump_host` means no jump.
+  final String jumpHost;
+  final int jumpPort;
+  final String jumpUsername;
+  final String jumpPrivateKeyPath;
+
   const Profile({
     required this.id,
     required this.name,
@@ -47,6 +53,10 @@ class Profile {
     required this.privateKeyPath,
     required this.notes,
     required this.authMethod,
+    required this.jumpHost,
+    required this.jumpPort,
+    required this.jumpUsername,
+    required this.jumpPrivateKeyPath,
   });
 
   @override
@@ -58,7 +68,11 @@ class Profile {
       username.hashCode ^
       privateKeyPath.hashCode ^
       notes.hashCode ^
-      authMethod.hashCode;
+      authMethod.hashCode ^
+      jumpHost.hashCode ^
+      jumpPort.hashCode ^
+      jumpUsername.hashCode ^
+      jumpPrivateKeyPath.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -72,5 +86,9 @@ class Profile {
           username == other.username &&
           privateKeyPath == other.privateKeyPath &&
           notes == other.notes &&
-          authMethod == other.authMethod;
+          authMethod == other.authMethod &&
+          jumpHost == other.jumpHost &&
+          jumpPort == other.jumpPort &&
+          jumpUsername == other.jumpUsername &&
+          jumpPrivateKeyPath == other.jumpPrivateKeyPath;
 }

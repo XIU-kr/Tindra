@@ -50,6 +50,10 @@ void main() {
         privateKeyPath: r'C:\Users\XIU\.ssh\id_ed25519',
         notes: 'integration test',
         authMethod: 'key',
+        jumpHost: '',
+        jumpPort: 22,
+        jumpUsername: '',
+        jumpPrivateKeyPath: '',
       ),
     );
 
@@ -76,6 +80,10 @@ void main() {
         privateKeyPath: 'k',
         notes: '',
         authMethod: 'key',
+        jumpHost: '',
+        jumpPort: 22,
+        jumpUsername: '',
+        jumpPrivateKeyPath: '',
       ),
     );
     await rust.upsertProfile(
@@ -88,6 +96,10 @@ void main() {
         privateKeyPath: 'k',
         notes: '',
         authMethod: 'key',
+        jumpHost: '',
+        jumpPort: 22,
+        jumpUsername: '',
+        jumpPrivateKeyPath: '',
       ),
     );
 
@@ -109,6 +121,10 @@ void main() {
         privateKeyPath: target.privateKeyPath,
         notes: 'edited',
         authMethod: target.authMethod,
+        jumpHost: target.jumpHost,
+        jumpPort: target.jumpPort,
+        jumpUsername: target.jumpUsername,
+        jumpPrivateKeyPath: target.jumpPrivateKeyPath,
       ),
     );
 

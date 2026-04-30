@@ -13,6 +13,11 @@ pub struct Profile {
     pub notes: String,
     /// "key" or "agent". Defaults to "key" when reading older profiles.
     pub auth_method: String,
+    /// Optional jump host. Empty `jump_host` means no jump.
+    pub jump_host: String,
+    pub jump_port: u16,
+    pub jump_username: String,
+    pub jump_private_key_path: String,
 }
 
 impl From<tindra_core::store::Profile> for Profile {
@@ -26,6 +31,10 @@ impl From<tindra_core::store::Profile> for Profile {
             private_key_path: p.private_key_path,
             notes: p.notes,
             auth_method: p.auth_method,
+            jump_host: p.jump_host,
+            jump_port: p.jump_port,
+            jump_username: p.jump_username,
+            jump_private_key_path: p.jump_private_key_path,
         }
     }
 }
@@ -45,6 +54,10 @@ impl From<Profile> for tindra_core::store::Profile {
             } else {
                 p.auth_method
             },
+            jump_host: p.jump_host,
+            jump_port: if p.jump_port == 0 { 22 } else { p.jump_port },
+            jump_username: p.jump_username,
+            jump_private_key_path: p.jump_private_key_path,
         }
     }
 }

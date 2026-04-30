@@ -35,6 +35,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  JumpHost dco_decode_box_autoadd_jump_host(dynamic raw);
+
+  @protected
   Profile dco_decode_box_autoadd_profile(dynamic raw);
 
   @protected
@@ -48,6 +51,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int dco_decode_i_32(dynamic raw);
+
+  @protected
+  JumpHost dco_decode_jump_host(dynamic raw);
 
   @protected
   List<Cell> dco_decode_list_cell(dynamic raw);
@@ -100,6 +106,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  JumpHost sse_decode_box_autoadd_jump_host(SseDeserializer deserializer);
+
+  @protected
   Profile sse_decode_box_autoadd_profile(SseDeserializer deserializer);
 
   @protected
@@ -113,6 +122,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
+
+  @protected
+  JumpHost sse_decode_jump_host(SseDeserializer deserializer);
 
   @protected
   List<Cell> sse_decode_list_cell(SseDeserializer deserializer);
@@ -169,6 +181,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_jump_host(
+    JumpHost self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_profile(Profile self, SseSerializer serializer);
 
   @protected
@@ -182,6 +200,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_jump_host(JumpHost self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_cell(List<Cell> self, SseSerializer serializer);

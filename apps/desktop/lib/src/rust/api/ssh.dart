@@ -6,9 +6,9 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `meta_registry`
+// These functions are ignored because they are not marked as `pub`: `jump_to_core`, `meta_registry`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `SessionMeta`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 Future<CommandOutput> runCommandPubkey({
   required String host,
@@ -34,6 +34,7 @@ Future<BigInt> openShellPubkey({
   String? passphrase,
   required int cols,
   required int rows,
+  required JumpHost jump,
 }) => RustLib.instance.api.crateApiSshOpenShellPubkey(
   host: host,
   port: port,
@@ -42,6 +43,7 @@ Future<BigInt> openShellPubkey({
   passphrase: passphrase,
   cols: cols,
   rows: rows,
+  jump: jump,
 );
 
 /// Phase 4.0 — open a shell using the local SSH agent for authentication.
@@ -51,12 +53,14 @@ Future<BigInt> openShellAgent({
   required String username,
   required int cols,
   required int rows,
+  required JumpHost jump,
 }) => RustLib.instance.api.crateApiSshOpenShellAgent(
   host: host,
   port: port,
   username: username,
   cols: cols,
   rows: rows,
+  jump: jump,
 );
 
 /// Stream of terminal snapshots. Bytes from the SSH session are fed into a
@@ -167,6 +171,43 @@ class CommandOutput {
           exitCode == other.exitCode &&
           stdout == other.stdout &&
           stderr == other.stderr;
+}
+
+/// One hop in a jump chain. Empty `host` means "no jump" (sent that way
+/// because frb 2.x optional structs are awkward across the bridge).
+class JumpHost {
+  final String host;
+  final int port;
+  final String username;
+  final String privateKeyPath;
+  final String? passphrase;
+
+  const JumpHost({
+    required this.host,
+    required this.port,
+    required this.username,
+    required this.privateKeyPath,
+    this.passphrase,
+  });
+
+  @override
+  int get hashCode =>
+      host.hashCode ^
+      port.hashCode ^
+      username.hashCode ^
+      privateKeyPath.hashCode ^
+      passphrase.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is JumpHost &&
+          runtimeType == other.runtimeType &&
+          host == other.host &&
+          port == other.port &&
+          username == other.username &&
+          privateKeyPath == other.privateKeyPath &&
+          passphrase == other.passphrase;
 }
 
 /// One frame of terminal state.

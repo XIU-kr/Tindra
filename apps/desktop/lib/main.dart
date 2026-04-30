@@ -220,6 +220,13 @@ class _ShellScreenState extends State<ShellScreen> {
     });
 
     try {
+      final jump = rust.JumpHost(
+        host: p.jumpHost,
+        port: p.jumpPort == 0 ? 22 : p.jumpPort,
+        username: p.jumpUsername,
+        privateKeyPath: p.jumpPrivateKeyPath,
+        passphrase: null,
+      );
       final id = p.authMethod == 'agent'
           ? await rust.openShellAgent(
               host: p.host,
@@ -227,6 +234,7 @@ class _ShellScreenState extends State<ShellScreen> {
               username: p.username,
               cols: tab.cols,
               rows: tab.rows,
+              jump: jump,
             )
           : await rust.openShellPubkey(
               host: p.host,
@@ -236,6 +244,7 @@ class _ShellScreenState extends State<ShellScreen> {
               passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
               cols: tab.cols,
               rows: tab.rows,
+              jump: jump,
             );
       tab.sessionId = id;
       tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
@@ -1038,7 +1047,12 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   late final TextEditingController _user;
   late final TextEditingController _key;
   late final TextEditingController _notes;
+  late final TextEditingController _jumpHost;
+  late final TextEditingController _jumpPort;
+  late final TextEditingController _jumpUser;
+  late final TextEditingController _jumpKey;
   late String _authMethod;
+  late bool _showJump;
 
   @override
   void initState() {
@@ -1051,13 +1065,30 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     _key = TextEditingController(
         text: p?.privateKeyPath ?? r'C:\Users\XIU\.ssh\id_ed25519');
     _notes = TextEditingController(text: p?.notes ?? '');
+    _jumpHost = TextEditingController(text: p?.jumpHost ?? '');
+    _jumpPort = TextEditingController(
+        text: ((p?.jumpPort ?? 0) == 0 ? 22 : p!.jumpPort).toString());
+    _jumpUser = TextEditingController(text: p?.jumpUsername ?? '');
+    _jumpKey = TextEditingController(text: p?.jumpPrivateKeyPath ?? '');
     _authMethod =
         (p?.authMethod.isEmpty ?? true) ? 'key' : p!.authMethod;
+    _showJump = (p?.jumpHost.isNotEmpty ?? false);
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _host, _port, _user, _key, _notes]) {
+    for (final c in [
+      _name,
+      _host,
+      _port,
+      _user,
+      _key,
+      _notes,
+      _jumpHost,
+      _jumpPort,
+      _jumpUser,
+      _jumpKey,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -1065,6 +1096,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
 
   void _save() {
     final port = int.tryParse(_port.text.trim()) ?? 22;
+    final jumpPort = int.tryParse(_jumpPort.text.trim()) ?? 22;
     final p = rust.Profile(
       id: widget.initial?.id ?? '',
       name: _name.text.trim().isEmpty
@@ -1076,6 +1108,10 @@ class _ProfileDialogState extends State<_ProfileDialog> {
       privateKeyPath: _key.text.trim(),
       notes: _notes.text,
       authMethod: _authMethod,
+      jumpHost: _showJump ? _jumpHost.text.trim() : '',
+      jumpPort: jumpPort,
+      jumpUsername: _showJump ? _jumpUser.text.trim() : '',
+      jumpPrivateKeyPath: _showJump ? _jumpKey.text.trim() : '',
     );
     Navigator.pop(context, p);
   }
@@ -1102,6 +1138,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
               ]),
               _authMethodPicker(),
               if (_authMethod == 'key') _row('Private key path', _key),
+              _jumpSection(),
               _row('Notes', _notes, hint: 'optional', maxLines: 2),
             ],
           ),
@@ -1119,6 +1156,41 @@ class _ProfileDialogState extends State<_ProfileDialog> {
           child: Text(isNew ? 'Create' : 'Save'),
         ),
       ],
+    );
+  }
+
+  Widget _jumpSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Padding(
+              padding: EdgeInsets.only(left: 4),
+              child: Text('Jump host',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+            ),
+            const Spacer(),
+            Switch(
+              value: _showJump,
+              onChanged: (v) => setState(() => _showJump = v),
+            ),
+          ]),
+          if (_showJump) ...[
+            Row(children: [
+              Expanded(child: _row('Host', _jumpHost, hint: 'jump.example.com')),
+              const SizedBox(width: 8),
+              SizedBox(width: 100, child: _row('Port', _jumpPort)),
+            ]),
+            Row(children: [
+              Expanded(child: _row('User', _jumpUser, hint: 'XIU')),
+              const SizedBox(width: 8),
+              Expanded(child: _row('Key path', _jumpKey)),
+            ]),
+          ],
+        ],
+      ),
     );
   }
 

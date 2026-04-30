@@ -51,10 +51,23 @@ pub struct Profile {
     /// SSH agent. Other values are reserved.
     #[serde(default = "default_auth_method")]
     pub auth_method: String,
+    /// Optional jump host. Empty `jump_host` means no jump.
+    #[serde(default)]
+    pub jump_host: String,
+    #[serde(default = "default_port")]
+    pub jump_port: u16,
+    #[serde(default)]
+    pub jump_username: String,
+    #[serde(default)]
+    pub jump_private_key_path: String,
 }
 
 fn default_auth_method() -> String {
     "key".to_string()
+}
+
+fn default_port() -> u16 {
+    22
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]

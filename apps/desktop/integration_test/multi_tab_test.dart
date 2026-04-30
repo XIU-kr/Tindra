@@ -37,6 +37,10 @@ void main() {
         privateKeyPath: _keyPath,
         notes: '',
         authMethod: 'key',
+        jumpHost: '',
+        jumpPort: 22,
+        jumpUsername: '',
+        jumpPrivateKeyPath: '',
       ),
     );
   });
