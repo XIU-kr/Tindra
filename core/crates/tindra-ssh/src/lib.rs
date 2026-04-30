@@ -32,6 +32,10 @@ pub enum SshError {
     Io(#[from] std::io::Error),
     #[error("authentication failed")]
     AuthFailed,
+    #[error("ssh-agent unavailable: {0}")]
+    AgentUnavailable(String),
+    #[error("ssh-agent has no identities — run `ssh-add` first")]
+    AgentNoIdentities,
     #[error("session {0} not found or already closed")]
     SessionNotFound(u64),
 }
@@ -276,6 +280,149 @@ pub async fn shell_close(session_id: u64) -> Result<(), SshError> {
         // can take a few hundred ms and we don't want to block the caller.
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4.0 — agent-based auth
+// ---------------------------------------------------------------------------
+
+/// Open an interactive shell using the local SSH agent for authentication.
+///
+/// Windows: connects to the OpenSSH Agent named pipe
+/// (`\\.\pipe\openssh-ssh-agent`). The `ssh-agent` service must be running
+/// and at least one key must have been `ssh-add`ed.
+///
+/// Unix: uses `SSH_AUTH_SOCK`.
+pub async fn open_shell_agent(
+    host: String,
+    port: u16,
+    username: String,
+    cols: u32,
+    rows: u32,
+) -> Result<u64, SshError> {
+    let (output_tx, output_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+
+    let mut handle: Handle<TofuHandler> =
+        client::connect(config, (host.as_str(), port), TofuHandler).await?;
+    authenticate_via_agent(&mut handle, &username).await?;
+
+    let mut channel = handle.channel_open_session().await?;
+    channel
+        .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
+        .await?;
+    channel.request_shell(false).await?;
+
+    let (write_tx, mut write_rx) = mpsc::unbounded_channel::<ShellCommand>();
+    let id = next_session_id();
+
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                msg = channel.wait() => {
+                    match msg {
+                        Some(ChannelMsg::Data { data }) => {
+                            if output_tx.send(data.to_vec()).is_err() { break; }
+                        }
+                        Some(ChannelMsg::ExtendedData { data, .. }) => {
+                            if output_tx.send(data.to_vec()).is_err() { break; }
+                        }
+                        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                        _ => {}
+                    }
+                }
+                Some(cmd) = write_rx.recv() => {
+                    match cmd {
+                        ShellCommand::Data(data) => {
+                            if channel.data(&data[..]).await.is_err() { break; }
+                        }
+                        ShellCommand::Resize { cols, rows } => {
+                            let _ = channel.window_change(cols, rows, 0, 0).await;
+                        }
+                        ShellCommand::Close => break,
+                    }
+                }
+            }
+        }
+        let _ = output_tx.send(b"\r\n[connection closed]\r\n".to_vec());
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+    });
+
+    registry().lock().await.insert(
+        id,
+        ActiveShell {
+            write_tx,
+            output_rx: Mutex::new(Some(output_rx)),
+            _task: task,
+        },
+    );
+    Ok(id)
+}
+
+/// Walks every identity the local agent advertises and tries each one against
+/// the server. Returns Ok on the first success; AuthFailed if none work.
+async fn authenticate_via_agent(
+    handle: &mut Handle<TofuHandler>,
+    username: &str,
+) -> Result<(), SshError> {
+    #[cfg(windows)]
+    let mut agent = {
+        use russh::keys::agent::client::AgentClient;
+        use tokio::net::windows::named_pipe::ClientOptions;
+        // Retry briefly: ERROR_PIPE_BUSY (231) is common when something else
+        // is mid-handshake with the agent.
+        let mut last_err: Option<std::io::Error> = None;
+        let mut stream = None;
+        for _ in 0..5 {
+            match ClientOptions::new().open(r"\\.\pipe\openssh-ssh-agent") {
+                Ok(s) => { stream = Some(s); break; }
+                Err(e) if e.raw_os_error() == Some(231) => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    last_err = Some(e);
+                }
+                Err(e) => { last_err = Some(e); break; }
+            }
+        }
+        let stream = stream.ok_or_else(|| {
+            SshError::AgentUnavailable(
+                last_err
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "openssh-ssh-agent named pipe not available".into()),
+            )
+        })?;
+        AgentClient::connect(stream)
+    };
+    #[cfg(unix)]
+    let mut agent = {
+        use russh::keys::agent::client::AgentClient;
+        AgentClient::connect_env()
+            .await
+            .map_err(|e| SshError::AgentUnavailable(e.to_string()))?
+    };
+
+    let identities = agent
+        .request_identities()
+        .await
+        .map_err(|e| SshError::AgentUnavailable(e.to_string()))?;
+    if identities.is_empty() {
+        return Err(SshError::AgentNoIdentities);
+    }
+
+    for key in identities {
+        let (returned_agent, result) = handle
+            .authenticate_future(username.to_string(), key, agent)
+            .await;
+        agent = returned_agent;
+        if matches!(result, Ok(true)) {
+            return Ok(());
+        }
+    }
+    Err(SshError::AuthFailed)
 }
 
 // ---------------------------------------------------------------------------

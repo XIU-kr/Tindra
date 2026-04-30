@@ -44,6 +44,21 @@ Future<BigInt> openShellPubkey({
   rows: rows,
 );
 
+/// Phase 4.0 — open a shell using the local SSH agent for authentication.
+Future<BigInt> openShellAgent({
+  required String host,
+  required int port,
+  required String username,
+  required int cols,
+  required int rows,
+}) => RustLib.instance.api.crateApiSshOpenShellAgent(
+  host: host,
+  port: port,
+  username: username,
+  cols: cols,
+  rows: rows,
+);
+
 /// Stream of terminal snapshots. Bytes from the SSH session are fed into a
 /// per-session vt100::Parser; after each chunk a fresh `TerminalSnapshot` is
 /// pushed. Call this exactly once per session.

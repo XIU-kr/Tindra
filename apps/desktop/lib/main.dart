@@ -220,15 +220,23 @@ class _ShellScreenState extends State<ShellScreen> {
     });
 
     try {
-      final id = await rust.openShellPubkey(
-        host: p.host,
-        port: p.port,
-        username: p.username,
-        privateKeyPath: p.privateKeyPath,
-        passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
-        cols: tab.cols,
-        rows: tab.rows,
-      );
+      final id = p.authMethod == 'agent'
+          ? await rust.openShellAgent(
+              host: p.host,
+              port: p.port,
+              username: p.username,
+              cols: tab.cols,
+              rows: tab.rows,
+            )
+          : await rust.openShellPubkey(
+              host: p.host,
+              port: p.port,
+              username: p.username,
+              privateKeyPath: p.privateKeyPath,
+              passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
+              cols: tab.cols,
+              rows: tab.rows,
+            );
       tab.sessionId = id;
       tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
         (snap) {
@@ -1030,6 +1038,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   late final TextEditingController _user;
   late final TextEditingController _key;
   late final TextEditingController _notes;
+  late String _authMethod;
 
   @override
   void initState() {
@@ -1042,6 +1051,8 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     _key = TextEditingController(
         text: p?.privateKeyPath ?? r'C:\Users\XIU\.ssh\id_ed25519');
     _notes = TextEditingController(text: p?.notes ?? '');
+    _authMethod =
+        (p?.authMethod.isEmpty ?? true) ? 'key' : p!.authMethod;
   }
 
   @override
@@ -1064,6 +1075,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
       username: _user.text.trim(),
       privateKeyPath: _key.text.trim(),
       notes: _notes.text,
+      authMethod: _authMethod,
     );
     Navigator.pop(context, p);
   }
@@ -1088,7 +1100,8 @@ class _ProfileDialogState extends State<_ProfileDialog> {
                 const SizedBox(width: 8),
                 SizedBox(width: 100, child: _row('Port', _port)),
               ]),
-              _row('Private key path', _key),
+              _authMethodPicker(),
+              if (_authMethod == 'key') _row('Private key path', _key),
               _row('Notes', _notes, hint: 'optional', maxLines: 2),
             ],
           ),
@@ -1106,6 +1119,44 @@ class _ProfileDialogState extends State<_ProfileDialog> {
           child: Text(isNew ? 'Create' : 'Save'),
         ),
       ],
+    );
+  }
+
+  Widget _authMethodPicker() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 4, bottom: 4),
+            child: Text('Auth',
+                style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+          ),
+          Row(children: [
+            Expanded(
+              child: RadioListTile<String>(
+                title: const Text('Private key', style: TextStyle(fontSize: 13)),
+                value: 'key',
+                groupValue: _authMethod,
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                onChanged: (v) => setState(() => _authMethod = v ?? 'key'),
+              ),
+            ),
+            Expanded(
+              child: RadioListTile<String>(
+                title: const Text('SSH agent', style: TextStyle(fontSize: 13)),
+                value: 'agent',
+                groupValue: _authMethod,
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                onChanged: (v) => setState(() => _authMethod = v ?? 'key'),
+              ),
+            ),
+          ]),
+        ],
+      ),
     );
   }
 

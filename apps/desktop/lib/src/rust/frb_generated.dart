@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 990195082;
+  int get rustContentHash => -2065815097;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -89,6 +89,14 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiHelloInitApp();
 
   Future<List<Profile>> crateApiProfilesListProfiles();
+
+  Future<BigInt> crateApiSshOpenShellAgent({
+    required String host,
+    required int port,
+    required String username,
+    required int cols,
+    required int rows,
+  });
 
   Future<BigInt> crateApiSshOpenShellPubkey({
     required String host,
@@ -267,6 +275,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "list_profiles", argNames: []);
 
   @override
+  Future<BigInt> crateApiSshOpenShellAgent({
+    required String host,
+    required int port,
+    required String username,
+    required int cols,
+    required int rows,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(host, serializer);
+          sse_encode_u_16(port, serializer);
+          sse_encode_String(username, serializer);
+          sse_encode_u_32(cols, serializer);
+          sse_encode_u_32(rows, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_64,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSshOpenShellAgentConstMeta,
+        argValues: [host, port, username, cols, rows],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSshOpenShellAgentConstMeta => const TaskConstMeta(
+    debugName: "open_shell_agent",
+    argNames: ["host", "port", "username", "cols", "rows"],
+  );
+
+  @override
   Future<BigInt> crateApiSshOpenShellPubkey({
     required String host,
     required int port,
@@ -290,7 +338,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 7,
             port: port_,
           );
         },
@@ -335,7 +383,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 8,
             port: port_,
           );
         },
@@ -375,7 +423,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 9,
             port: port_,
           );
         },
@@ -413,7 +461,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 10,
             port: port_,
           );
         },
@@ -446,7 +494,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 10,
+              funcId: 11,
               port: port_,
             );
           },
@@ -485,7 +533,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 12,
             port: port_,
           );
         },
@@ -519,7 +567,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 13,
             port: port_,
           );
         },
@@ -549,7 +597,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 14,
             port: port_,
           );
         },
@@ -680,8 +728,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Profile dco_decode_profile(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return Profile(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
@@ -690,6 +738,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       username: dco_decode_String(arr[4]),
       privateKeyPath: dco_decode_String(arr[5]),
       notes: dco_decode_String(arr[6]),
+      authMethod: dco_decode_String(arr[7]),
     );
   }
 
@@ -872,6 +921,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_username = sse_decode_String(deserializer);
     var var_privateKeyPath = sse_decode_String(deserializer);
     var var_notes = sse_decode_String(deserializer);
+    var var_authMethod = sse_decode_String(deserializer);
     return Profile(
       id: var_id,
       name: var_name,
@@ -880,6 +930,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       username: var_username,
       privateKeyPath: var_privateKeyPath,
       notes: var_notes,
+      authMethod: var_authMethod,
     );
   }
 
@@ -1069,6 +1120,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.username, serializer);
     sse_encode_String(self.privateKeyPath, serializer);
     sse_encode_String(self.notes, serializer);
+    sse_encode_String(self.authMethod, serializer);
   }
 
   @protected

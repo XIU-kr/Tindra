@@ -36,6 +36,7 @@ void main() {
         username: Platform.environment['USERNAME'] ?? 'XIU',
         privateKeyPath: _keyPath,
         notes: '',
+        authMethod: 'key',
       ),
     );
   });

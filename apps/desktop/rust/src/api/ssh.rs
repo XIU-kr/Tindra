@@ -157,6 +157,25 @@ pub async fn open_shell_pubkey(
     Ok(id)
 }
 
+/// Phase 4.0 — open a shell using the local SSH agent for authentication.
+pub async fn open_shell_agent(
+    host: String,
+    port: u16,
+    username: String,
+    cols: u32,
+    rows: u32,
+) -> Result<u64, String> {
+    let id = tindra_core::ssh::open_shell_agent(host, port, username, cols, rows)
+        .await
+        .map_err(|e| e.to_string())?;
+    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
+    meta_registry()
+        .lock()
+        .await
+        .insert(id, SessionMeta { parser });
+    Ok(id)
+}
+
 /// Stream of terminal snapshots. Bytes from the SSH session are fed into a
 /// per-session vt100::Parser; after each chunk a fresh `TerminalSnapshot` is
 /// pushed. Call this exactly once per session.

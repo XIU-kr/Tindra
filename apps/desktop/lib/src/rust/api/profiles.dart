@@ -35,6 +35,9 @@ class Profile {
   final String privateKeyPath;
   final String notes;
 
+  /// "key" or "agent". Defaults to "key" when reading older profiles.
+  final String authMethod;
+
   const Profile({
     required this.id,
     required this.name,
@@ -43,6 +46,7 @@ class Profile {
     required this.username,
     required this.privateKeyPath,
     required this.notes,
+    required this.authMethod,
   });
 
   @override
@@ -53,7 +57,8 @@ class Profile {
       port.hashCode ^
       username.hashCode ^
       privateKeyPath.hashCode ^
-      notes.hashCode;
+      notes.hashCode ^
+      authMethod.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -66,5 +71,6 @@ class Profile {
           port == other.port &&
           username == other.username &&
           privateKeyPath == other.privateKeyPath &&
-          notes == other.notes;
+          notes == other.notes &&
+          authMethod == other.authMethod;
 }

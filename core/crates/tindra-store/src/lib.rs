@@ -47,6 +47,14 @@ pub struct Profile {
     /// Optional free-form notes.
     #[serde(default)]
     pub notes: String,
+    /// "key" (default) uses `private_key_path`; "agent" uses the local
+    /// SSH agent. Other values are reserved.
+    #[serde(default = "default_auth_method")]
+    pub auth_method: String,
+}
+
+fn default_auth_method() -> String {
+    "key".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]

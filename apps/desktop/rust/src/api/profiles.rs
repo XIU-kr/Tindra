@@ -11,6 +11,8 @@ pub struct Profile {
     pub username: String,
     pub private_key_path: String,
     pub notes: String,
+    /// "key" or "agent". Defaults to "key" when reading older profiles.
+    pub auth_method: String,
 }
 
 impl From<tindra_core::store::Profile> for Profile {
@@ -23,6 +25,7 @@ impl From<tindra_core::store::Profile> for Profile {
             username: p.username,
             private_key_path: p.private_key_path,
             notes: p.notes,
+            auth_method: p.auth_method,
         }
     }
 }
@@ -37,6 +40,11 @@ impl From<Profile> for tindra_core::store::Profile {
             username: p.username,
             private_key_path: p.private_key_path,
             notes: p.notes,
+            auth_method: if p.auth_method.is_empty() {
+                "key".to_string()
+            } else {
+                p.auth_method
+            },
         }
     }
 }
