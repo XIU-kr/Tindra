@@ -99,6 +99,13 @@ pub struct Profile {
     pub jump_username: String,
     #[serde(default)]
     pub jump_private_key_path: String,
+    /// "ssh" (default), "telnet". "serial" reserved for future work.
+    #[serde(default = "default_transport")]
+    pub transport: String,
+}
+
+fn default_transport() -> String {
+    "ssh".to_string()
 }
 
 fn default_auth_method() -> String {

@@ -41,6 +41,7 @@ void main() {
         jumpPort: 22,
         jumpUsername: '',
         jumpPrivateKeyPath: '',
+        transport: 'ssh',
       ),
     );
   });

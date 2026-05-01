@@ -44,6 +44,9 @@ class Profile {
   final String jumpUsername;
   final String jumpPrivateKeyPath;
 
+  /// "ssh" (default) or "telnet".
+  final String transport;
+
   const Profile({
     required this.id,
     required this.name,
@@ -57,6 +60,7 @@ class Profile {
     required this.jumpPort,
     required this.jumpUsername,
     required this.jumpPrivateKeyPath,
+    required this.transport,
   });
 
   @override
@@ -72,7 +76,8 @@ class Profile {
       jumpHost.hashCode ^
       jumpPort.hashCode ^
       jumpUsername.hashCode ^
-      jumpPrivateKeyPath.hashCode;
+      jumpPrivateKeyPath.hashCode ^
+      transport.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -90,5 +95,6 @@ class Profile {
           jumpHost == other.jumpHost &&
           jumpPort == other.jumpPort &&
           jumpUsername == other.jumpUsername &&
-          jumpPrivateKeyPath == other.jumpPrivateKeyPath;
+          jumpPrivateKeyPath == other.jumpPrivateKeyPath &&
+          transport == other.transport;
 }

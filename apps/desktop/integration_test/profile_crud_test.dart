@@ -54,6 +54,7 @@ void main() {
         jumpPort: 22,
         jumpUsername: '',
         jumpPrivateKeyPath: '',
+        transport: 'ssh',
       ),
     );
 
@@ -84,6 +85,7 @@ void main() {
         jumpPort: 22,
         jumpUsername: '',
         jumpPrivateKeyPath: '',
+        transport: 'ssh',
       ),
     );
     await rust.upsertProfile(
@@ -100,6 +102,7 @@ void main() {
         jumpPort: 22,
         jumpUsername: '',
         jumpPrivateKeyPath: '',
+        transport: 'ssh',
       ),
     );
 
@@ -125,6 +128,7 @@ void main() {
         jumpPort: target.jumpPort,
         jumpUsername: target.jumpUsername,
         jumpPrivateKeyPath: target.jumpPrivateKeyPath,
+        transport: target.transport,
       ),
     );
 

@@ -535,6 +535,75 @@ pub async fn stop_forward(id: u64) -> Result<(), SshError> {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 8c — Telnet transport (raw TCP, no IAC negotiation)
+// ---------------------------------------------------------------------------
+
+/// Open a "shell" backed by a plain TCP socket (Telnet-style). Most modern
+/// Telnet servers tolerate raw TCP and run in line/echo mode of their own
+/// accord; full IAC option negotiation is future work.
+pub async fn open_shell_telnet(
+    host: String,
+    port: u16,
+    _cols: u32,
+    _rows: u32,
+) -> Result<u64, SshError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let stream = tokio::net::TcpStream::connect((host.as_str(), port)).await?;
+    let (mut reader, mut writer) = stream.into_split();
+
+    let (output_tx, output_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (write_tx, mut write_rx) = mpsc::unbounded_channel::<ShellCommand>();
+    let id = next_session_id();
+
+    // Reader task — pumps bytes from the socket into output_tx.
+    let read_tx = output_tx.clone();
+    let read_task = tokio::spawn(async move {
+        let mut buf = vec![0u8; 4096];
+        loop {
+            match reader.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if read_tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Writer / control task — drains write_rx into the socket.
+    let task = tokio::spawn(async move {
+        while let Some(cmd) = write_rx.recv().await {
+            match cmd {
+                ShellCommand::Data(data) => {
+                    if writer.write_all(&data).await.is_err() {
+                        break;
+                    }
+                    let _ = writer.flush().await;
+                }
+                ShellCommand::Resize { .. } => {}
+                ShellCommand::Close => break,
+            }
+        }
+        // Stop the reader and signal disconnect.
+        read_task.abort();
+        let _ = output_tx.send(b"\r\n[connection closed]\r\n".to_vec());
+    });
+
+    registry().lock().await.insert(
+        id,
+        ActiveShell {
+            write_tx,
+            output_rx: Mutex::new(Some(output_rx)),
+            _task: task,
+            _jump_handle: None,
+        },
+    );
+    Ok(id)
+}
+
+// ---------------------------------------------------------------------------
 // Phase 4.0 — agent-based auth
 // ---------------------------------------------------------------------------
 

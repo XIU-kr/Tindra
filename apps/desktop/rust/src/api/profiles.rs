@@ -18,6 +18,8 @@ pub struct Profile {
     pub jump_port: u16,
     pub jump_username: String,
     pub jump_private_key_path: String,
+    /// "ssh" (default) or "telnet".
+    pub transport: String,
 }
 
 impl From<tindra_core::store::Profile> for Profile {
@@ -35,6 +37,7 @@ impl From<tindra_core::store::Profile> for Profile {
             jump_port: p.jump_port,
             jump_username: p.jump_username,
             jump_private_key_path: p.jump_private_key_path,
+            transport: p.transport,
         }
     }
 }
@@ -58,6 +61,11 @@ impl From<Profile> for tindra_core::store::Profile {
             jump_port: if p.jump_port == 0 { 22 } else { p.jump_port },
             jump_username: p.jump_username,
             jump_private_key_path: p.jump_private_key_path,
+            transport: if p.transport.is_empty() {
+                "ssh".to_string()
+            } else {
+                p.transport
+            },
         }
     }
 }

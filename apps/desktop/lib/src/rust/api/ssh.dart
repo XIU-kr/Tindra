@@ -46,6 +46,19 @@ Future<BigInt> openShellPubkey({
   jump: jump,
 );
 
+/// Phase 8c — open a Telnet (raw TCP) session.
+Future<BigInt> openShellTelnet({
+  required String host,
+  required int port,
+  required int cols,
+  required int rows,
+}) => RustLib.instance.api.crateApiSshOpenShellTelnet(
+  host: host,
+  port: port,
+  cols: cols,
+  rows: rows,
+);
+
 /// Phase 4.0 — open a shell using the local SSH agent for authentication.
 Future<BigInt> openShellAgent({
   required String host,

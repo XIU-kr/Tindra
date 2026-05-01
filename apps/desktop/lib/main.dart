@@ -370,25 +370,35 @@ class _ShellScreenState extends State<ShellScreen> {
         privateKeyPath: p.jumpPrivateKeyPath,
         passphrase: null,
       );
-      final id = p.authMethod == 'agent'
-          ? await rust.openShellAgent(
-              host: p.host,
-              port: p.port,
-              username: p.username,
-              cols: tab.cols,
-              rows: tab.rows,
-              jump: jump,
-            )
-          : await rust.openShellPubkey(
-              host: p.host,
-              port: p.port,
-              username: p.username,
-              privateKeyPath: p.privateKeyPath,
-              passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
-              cols: tab.cols,
-              rows: tab.rows,
-              jump: jump,
-            );
+      final BigInt id;
+      if (p.transport == 'telnet') {
+        id = await rust.openShellTelnet(
+          host: p.host,
+          port: p.port,
+          cols: tab.cols,
+          rows: tab.rows,
+        );
+      } else if (p.authMethod == 'agent') {
+        id = await rust.openShellAgent(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
+        );
+      } else {
+        id = await rust.openShellPubkey(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          privateKeyPath: p.privateKeyPath,
+          passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
+        );
+      }
       tab.sessionId = id;
       tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
         (snap) {
@@ -1415,6 +1425,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   late final TextEditingController _jumpKey;
   late String _authMethod;
   late bool _showJump;
+  late String _transport;
 
   @override
   void initState() {
@@ -1435,6 +1446,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
     _authMethod =
         (p?.authMethod.isEmpty ?? true) ? 'key' : p!.authMethod;
     _showJump = (p?.jumpHost.isNotEmpty ?? false);
+    _transport = (p?.transport.isEmpty ?? true) ? 'ssh' : p!.transport;
   }
 
   @override
@@ -1474,6 +1486,7 @@ class _ProfileDialogState extends State<_ProfileDialog> {
       jumpPort: jumpPort,
       jumpUsername: _showJump ? _jumpUser.text.trim() : '',
       jumpPrivateKeyPath: _showJump ? _jumpKey.text.trim() : '',
+      transport: _transport,
     );
     Navigator.pop(context, p);
   }
@@ -1498,8 +1511,11 @@ class _ProfileDialogState extends State<_ProfileDialog> {
                 const SizedBox(width: 8),
                 SizedBox(width: 100, child: _row('Port', _port)),
               ]),
-              _authMethodPicker(),
-              if (_authMethod == 'key') _row('Private key path', _key),
+              _transportPicker(),
+              if (_transport == 'ssh') ...[
+                _authMethodPicker(),
+                if (_authMethod == 'key') _row('Private key path', _key),
+              ],
               _jumpSection(),
               _row('Notes', _notes, hint: 'optional', maxLines: 2),
             ],
@@ -1518,6 +1534,30 @@ class _ProfileDialogState extends State<_ProfileDialog> {
           child: Text(isNew ? 'Create' : 'Save'),
         ),
       ],
+    );
+  }
+
+  Widget _transportPicker() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 4, bottom: 4),
+            child: Text('Transport',
+                style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: _transport,
+            items: const [
+              DropdownMenuItem(value: 'ssh', child: Text('SSH')),
+              DropdownMenuItem(value: 'telnet', child: Text('Telnet (raw TCP)')),
+            ],
+            onChanged: (v) => setState(() => _transport = v ?? 'ssh'),
+          ),
+        ],
+      ),
     );
   }
 

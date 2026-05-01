@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1597650756;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -294283884;
 
 // Section: executor
 
@@ -577,6 +577,48 @@ fn wire__crate__api__ssh__open_shell_pubkey_impl(
                             api_cols,
                             api_rows,
                             api_jump,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__ssh__open_shell_telnet_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "open_shell_telnet",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_host = <String>::sse_decode(&mut deserializer);
+            let api_port = <u16>::sse_decode(&mut deserializer);
+            let api_cols = <u32>::sse_decode(&mut deserializer);
+            let api_rows = <u32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::api::ssh::open_shell_telnet(
+                            api_host, api_port, api_cols, api_rows,
                         )
                         .await?;
                         Ok(output_ok)
@@ -1426,6 +1468,7 @@ impl SseDecode for crate::api::profiles::Profile {
         let mut var_jumpPort = <u16>::sse_decode(deserializer);
         let mut var_jumpUsername = <String>::sse_decode(deserializer);
         let mut var_jumpPrivateKeyPath = <String>::sse_decode(deserializer);
+        let mut var_transport = <String>::sse_decode(deserializer);
         return crate::api::profiles::Profile {
             id: var_id,
             name: var_name,
@@ -1439,6 +1482,7 @@ impl SseDecode for crate::api::profiles::Profile {
             jump_port: var_jumpPort,
             jump_username: var_jumpUsername,
             jump_private_key_path: var_jumpPrivateKeyPath,
+            transport: var_transport,
         };
     }
 }
@@ -1564,22 +1608,23 @@ fn pde_ffi_dispatcher_primary_impl(
         11 => wire__crate__api__sftp__open_sftp_pubkey_impl(port, ptr, rust_vec_len, data_len),
         12 => wire__crate__api__ssh__open_shell_agent_impl(port, ptr, rust_vec_len, data_len),
         13 => wire__crate__api__ssh__open_shell_pubkey_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__profiles__profiles_path_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__ssh__run_command_pubkey_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__settings__save_settings_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__sftp__sftp_close_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__sftp__sftp_download_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__sftp__sftp_home_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__sftp__sftp_list_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__sftp__sftp_make_dir_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__sftp__sftp_remove_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__sftp__sftp_upload_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__ssh__shell_close_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__ssh__shell_output_stream_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__ssh__shell_resize_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__ssh__shell_write_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__forward__stop_forward_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__profiles__upsert_profile_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__ssh__open_shell_telnet_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__profiles__profiles_path_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__ssh__run_command_pubkey_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__settings__save_settings_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__sftp__sftp_close_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__sftp__sftp_download_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__sftp__sftp_home_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__sftp__sftp_list_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__sftp__sftp_make_dir_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__sftp__sftp_remove_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__sftp__sftp_upload_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__ssh__shell_close_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__ssh__shell_output_stream_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__ssh__shell_resize_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__ssh__shell_write_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__forward__stop_forward_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__profiles__upsert_profile_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1717,6 +1762,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::profiles::Profile {
             self.jump_port.into_into_dart().into_dart(),
             self.jump_username.into_into_dart().into_dart(),
             self.jump_private_key_path.into_into_dart().into_dart(),
+            self.transport.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1971,6 +2017,7 @@ impl SseEncode for crate::api::profiles::Profile {
         <u16>::sse_encode(self.jump_port, serializer);
         <String>::sse_encode(self.jump_username, serializer);
         <String>::sse_encode(self.jump_private_key_path, serializer);
+        <String>::sse_encode(self.transport, serializer);
     }
 }
 

@@ -191,6 +191,24 @@ pub async fn open_shell_pubkey(
     Ok(id)
 }
 
+/// Phase 8c — open a Telnet (raw TCP) session.
+pub async fn open_shell_telnet(
+    host: String,
+    port: u16,
+    cols: u32,
+    rows: u32,
+) -> Result<u64, String> {
+    let id = tindra_core::ssh::open_shell_telnet(host, port, cols, rows)
+        .await
+        .map_err(|e| e.to_string())?;
+    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
+    meta_registry()
+        .lock()
+        .await
+        .insert(id, SessionMeta { parser });
+    Ok(id)
+}
+
 /// Phase 4.0 — open a shell using the local SSH agent for authentication.
 pub async fn open_shell_agent(
     host: String,
