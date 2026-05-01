@@ -10,6 +10,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:window_manager/window_manager.dart';
 import 'dart:io';
 
 import 'package:tindra_desktop/src/rust/api/forward.dart' as rust;
@@ -20,13 +22,83 @@ import 'package:tindra_desktop/src/rust/api/ssh.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
 Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+  await hotKeyManager.unregisterAll();
   await RustLib.init();
   try {
     appSettings.value = await rust.loadSettings();
   } catch (_) {
     // Fall back to the in-code defaults if the file is unreadable.
   }
+  await _registerQuakeHotkey();
+  appSettings.addListener(_registerQuakeHotkey);
   runApp(const TindraApp());
+}
+
+/// Quake-style global hotkey: pressing it from anywhere shows or hides the
+/// Tindra window. Re-registers whenever Settings.quakeHotkey changes.
+Future<void> _registerQuakeHotkey() async {
+  try {
+    await hotKeyManager.unregisterAll();
+  } catch (_) {}
+  final raw = appSettings.value.quakeHotkey.trim();
+  if (raw.isEmpty) return;
+  final key = _parseHotkey(raw);
+  if (key == null) return;
+  try {
+    await hotKeyManager.register(
+      HotKey(key: key, scope: HotKeyScope.system),
+      keyDownHandler: (_) async {
+        try {
+          final visible = await windowManager.isVisible();
+          if (visible) {
+            await windowManager.hide();
+          } else {
+            await windowManager.show();
+            await windowManager.focus();
+          }
+        } catch (_) {}
+      },
+    );
+  } catch (_) {
+    // Hotkey may already be in use by another app — silently fall back.
+  }
+}
+
+LogicalKeyboardKey? _parseHotkey(String s) {
+  switch (s.toUpperCase()) {
+    case 'F1':
+      return LogicalKeyboardKey.f1;
+    case 'F2':
+      return LogicalKeyboardKey.f2;
+    case 'F3':
+      return LogicalKeyboardKey.f3;
+    case 'F4':
+      return LogicalKeyboardKey.f4;
+    case 'F5':
+      return LogicalKeyboardKey.f5;
+    case 'F6':
+      return LogicalKeyboardKey.f6;
+    case 'F7':
+      return LogicalKeyboardKey.f7;
+    case 'F8':
+      return LogicalKeyboardKey.f8;
+    case 'F9':
+      return LogicalKeyboardKey.f9;
+    case 'F10':
+      return LogicalKeyboardKey.f10;
+    case 'F11':
+      return LogicalKeyboardKey.f11;
+    case 'F12':
+      return LogicalKeyboardKey.f12;
+    case 'BACKQUOTE':
+    case 'GRAVE':
+    case '`':
+      return LogicalKeyboardKey.backquote;
+    default:
+      return null;
+  }
 }
 
 /// Live settings broadcast to the whole widget tree. We use a ValueNotifier
@@ -2275,13 +2347,13 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             const SizedBox(height: 14),
             const Padding(
               padding: EdgeInsets.only(bottom: 4),
-              child: Text('Quake hotkey (placeholder)',
+              child: Text('Quake global hotkey',
                   style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
             ),
             TextField(
               controller: _quakeHotkey,
               decoration: const InputDecoration(
-                hintText: 'F12 — global show/hide (Phase 8)',
+                hintText: 'e.g. F12 (toggles window show/hide)',
               ),
             ),
           ],
