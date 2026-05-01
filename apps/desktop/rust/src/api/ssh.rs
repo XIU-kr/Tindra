@@ -6,8 +6,17 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use crate::frb_generated::StreamSink;
+use tindra_core::pty::detect_zrqinit;
 use tindra_core::term::{vt100::Parser, Snapshot as CoreSnapshot};
 use tokio::sync::Mutex;
+
+/// Phase 8d framework hook — best-effort detection of the ZMODEM ZRQINIT
+/// header in raw remote output. Returns true when a sender is starting a
+/// transfer; callers can use this to surface a "ZMODEM transfer detected"
+/// notification while the full receiver lands.
+pub fn looks_like_zmodem(bytes: Vec<u8>) -> bool {
+    detect_zrqinit(&bytes)
+}
 
 // ---------------------------------------------------------------------------
 // Phase 1.0 — one-shot exec

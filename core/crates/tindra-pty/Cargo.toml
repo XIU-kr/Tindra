@@ -13,6 +13,7 @@ publish.workspace = true
 tokio.workspace     = true
 thiserror.workspace = true
 tracing.workspace   = true
+zmodem2             = { workspace = true }
 
 # Enabled when local-shell tabs land:
 # portable-pty = { workspace = true }
