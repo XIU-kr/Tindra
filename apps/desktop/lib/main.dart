@@ -141,6 +141,29 @@ class _SessionTab {
   }
 }
 
+/// One tab in the bar. May host multiple sessions in a horizontal or
+/// vertical split (Phase 8a). MVP keeps the split linear: sessions are a
+/// flat list and the tab's split axis applies between every neighbour.
+class _TabGroup {
+  _TabGroup({
+    required this.profileName,
+    required _SessionTab first,
+  }) : sessions = [first];
+
+  final String profileName;
+  final List<_SessionTab> sessions;
+  Axis splitAxis = Axis.horizontal;
+  int activeIdx = 0;
+
+  _SessionTab get active => sessions[activeIdx.clamp(0, sessions.length - 1)];
+
+  Future<void> dispose() async {
+    for (final s in sessions) {
+      await s.dispose();
+    }
+  }
+}
+
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
 
@@ -157,8 +180,8 @@ class _ShellScreenState extends State<ShellScreen> {
   String? _selectedProfileId;
   bool _profilesLoading = true;
 
-  // Tab state
-  final List<_SessionTab> _tabs = [];
+  // Tab state — each tab is a group of one or more sessions in a split.
+  final List<_TabGroup> _tabs = [];
   int _activeIdx = -1;
 
   // Sidebar-only error (separate from per-tab error)
@@ -167,8 +190,10 @@ class _ShellScreenState extends State<ShellScreen> {
   rust.Profile? get _selectedProfile =>
       _profiles.where((p) => p.id == _selectedProfileId).firstOrNull;
 
-  _SessionTab? get _activeTab =>
+  _TabGroup? get _activeGroup =>
       (_activeIdx >= 0 && _activeIdx < _tabs.length) ? _tabs[_activeIdx] : null;
+
+  _SessionTab? get _activeTab => _activeGroup?.active;
 
   @override
   void initState() {
@@ -248,14 +273,21 @@ class _ShellScreenState extends State<ShellScreen> {
 
   // ---------------------- Tab lifecycle ----------------------
 
-  Future<void> _connectSelected() async {
+  Future<void> _connectSelected({_TabGroup? splitInto, Axis? axis}) async {
     final p = _selectedProfile;
     if (p == null) return;
 
     final tab = _SessionTab(profileId: p.id, profileName: p.name);
+    final group = splitInto;
     setState(() {
-      _tabs.add(tab);
-      _activeIdx = _tabs.length - 1;
+      if (group != null) {
+        if (axis != null) group.splitAxis = axis;
+        group.sessions.add(tab);
+        group.activeIdx = group.sessions.length - 1;
+      } else {
+        _tabs.add(_TabGroup(profileName: p.name, first: tab));
+        _activeIdx = _tabs.length - 1;
+      }
     });
 
     try {
@@ -312,6 +344,35 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
+  Future<void> _splitHorizontal() async {
+    if (_activeGroup == null || _selectedProfile == null) return;
+    await _connectSelected(
+        splitInto: _activeGroup, axis: Axis.horizontal);
+  }
+
+  Future<void> _splitVertical() async {
+    if (_activeGroup == null || _selectedProfile == null) return;
+    await _connectSelected(splitInto: _activeGroup, axis: Axis.vertical);
+  }
+
+  Future<void> _closeActiveSession() async {
+    final group = _activeGroup;
+    if (group == null) return;
+    if (group.sessions.length <= 1) {
+      await _closeTab(_activeIdx);
+      return;
+    }
+    final session = group.active;
+    final idx = group.activeIdx;
+    setState(() {
+      group.sessions.removeAt(idx);
+      if (group.activeIdx >= group.sessions.length) {
+        group.activeIdx = group.sessions.length - 1;
+      }
+    });
+    await session.dispose();
+  }
+
   Future<void> _disconnectActive() async {
     final tab = _activeTab;
     if (tab == null) return;
@@ -331,8 +392,8 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Future<void> _closeTab(int idx) async {
     if (idx < 0 || idx >= _tabs.length) return;
-    final tab = _tabs[idx];
-    await tab.dispose();
+    final group = _tabs[idx];
+    await group.dispose();
     setState(() {
       _tabs.removeAt(idx);
       if (_tabs.isEmpty) {
@@ -430,10 +491,14 @@ class _ShellScreenState extends State<ShellScreen> {
     if (ctrl) {
       // Reserved app-level shortcuts: leave unhandled so Shortcuts/Actions
       // can pick them up.
+      final shift = HardwareKeyboard.instance.isShiftPressed;
       if (logical == LogicalKeyboardKey.keyT ||
           logical == LogicalKeyboardKey.keyW ||
           logical == LogicalKeyboardKey.tab ||
-          logical == LogicalKeyboardKey.comma) {
+          logical == LogicalKeyboardKey.comma ||
+          (shift &&
+              (logical == LogicalKeyboardKey.keyH ||
+                  logical == LogicalKeyboardKey.keyV))) {
         return null;
       }
       final ch = event.character;
@@ -503,6 +568,10 @@ class _ShellScreenState extends State<ShellScreen> {
             control: true, shift: true): const _PrevTabIntent(),
         const SingleActivator(LogicalKeyboardKey.comma, control: true):
             const _SettingsIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyH,
+            control: true, shift: true): const _SplitHorizontalIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyV,
+            control: true, shift: true): const _SplitVerticalIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -514,7 +583,7 @@ class _ShellScreenState extends State<ShellScreen> {
           ),
           _CloseTabIntent: CallbackAction<_CloseTabIntent>(
             onInvoke: (_) {
-              if (_activeIdx >= 0) _closeTab(_activeIdx);
+              _closeActiveSession();
               return null;
             },
           ),
@@ -537,6 +606,18 @@ class _ShellScreenState extends State<ShellScreen> {
           _SettingsIntent: CallbackAction<_SettingsIntent>(
             onInvoke: (_) {
               _openSettingsDialog();
+              return null;
+            },
+          ),
+          _SplitHorizontalIntent: CallbackAction<_SplitHorizontalIntent>(
+            onInvoke: (_) {
+              _splitHorizontal();
+              return null;
+            },
+          ),
+          _SplitVerticalIntent: CallbackAction<_SplitVerticalIntent>(
+            onInvoke: (_) {
+              _splitVertical();
               return null;
             },
           ),
@@ -887,9 +968,9 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Widget _tab(int i) {
-    final tab = _tabs[i];
+    final group = _tabs[i];
     final active = i == _activeIdx;
-    final stateColor = switch (tab.state) {
+    final stateColor = switch (group.active.state) {
       _ConnState.connecting => const Color(0xFFFFB86C),
       _ConnState.connected => const Color(0xFF4ADE80),
       _ConnState.disconnected => const Color(0xFFFF6E6E),
@@ -925,7 +1006,9 @@ class _ShellScreenState extends State<ShellScreen> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  tab.profileName,
+                  group.sessions.length > 1
+                      ? '${group.profileName} (${group.sessions.length})'
+                      : group.profileName,
                   style: TextStyle(
                     fontSize: 12,
                     color: active
@@ -950,6 +1033,64 @@ class _ShellScreenState extends State<ShellScreen> {
         ),
       ),
     );
+  }
+
+  Widget _splitView({required double charWidth, required double lineHeight}) {
+    final group = _activeGroup;
+    if (group == null || group.sessions.isEmpty) {
+      return _CellGrid(
+        tab: null,
+        isFocused: _termFocus.hasFocus,
+        charWidth: charWidth,
+        lineHeight: lineHeight,
+        onDisconnect: _disconnectActive,
+      );
+    }
+    if (group.sessions.length == 1) {
+      return _CellGrid(
+        tab: group.sessions.first,
+        isFocused: _termFocus.hasFocus,
+        charWidth: charWidth,
+        lineHeight: lineHeight,
+        onDisconnect: _disconnectActive,
+      );
+    }
+    final children = <Widget>[];
+    for (var i = 0; i < group.sessions.length; i++) {
+      final isActive = i == group.activeIdx;
+      children.add(Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() {
+            group.activeIdx = i;
+            _termFocus.requestFocus();
+          }),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: isActive
+                    ? const Color(0xFF7AC0FF)
+                    : const Color(0xFF1F2937),
+                width: isActive ? 1.5 : 1,
+              ),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            margin: const EdgeInsets.all(2),
+            padding: const EdgeInsets.all(4),
+            child: _CellGrid(
+              tab: group.sessions[i],
+              isFocused: isActive && _termFocus.hasFocus,
+              charWidth: charWidth,
+              lineHeight: lineHeight,
+              onDisconnect: _disconnectActive,
+            ),
+          ),
+        ),
+      ));
+    }
+    return group.splitAxis == Axis.horizontal
+        ? Row(children: children)
+        : Column(children: children);
   }
 
   Widget _terminalPanel() {
@@ -990,12 +1131,9 @@ class _ShellScreenState extends State<ShellScreen> {
 
                 return Padding(
                   padding: const EdgeInsets.all(padding),
-                  child: _CellGrid(
-                    tab: _activeTab,
-                    isFocused: _termFocus.hasFocus,
+                  child: _splitView(
                     charWidth: charWidth,
                     lineHeight: lineHeight,
-                    onDisconnect: _disconnectActive,
                   ),
                 );
               },
@@ -2045,6 +2183,14 @@ class _PrevTabIntent extends Intent {
 
 class _SettingsIntent extends Intent {
   const _SettingsIntent();
+}
+
+class _SplitHorizontalIntent extends Intent {
+  const _SplitHorizontalIntent();
+}
+
+class _SplitVerticalIntent extends Intent {
+  const _SplitVerticalIntent();
 }
 
 class _SettingsDialog extends StatefulWidget {
