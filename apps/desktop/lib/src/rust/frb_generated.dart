@@ -3,6 +3,7 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/forward.dart';
 import 'api/hello.dart';
 import 'api/profiles.dart';
 import 'api/settings.dart';
@@ -70,7 +71,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -213402048;
+  int get rustContentHash => 1597650756;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -90,9 +91,35 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiHelloInitApp();
 
+  Future<List<PortForward>> crateApiForwardListForwards();
+
   Future<List<Profile>> crateApiProfilesListProfiles();
 
   Future<Settings> crateApiSettingsLoadSettings();
+
+  Future<BigInt> crateApiForwardOpenLocalForwardAgent({
+    required String host,
+    required int port,
+    required String username,
+    required JumpHost jump,
+    required String localAddr,
+    required int localPort,
+    required String remoteHost,
+    required int remotePort,
+  });
+
+  Future<BigInt> crateApiForwardOpenLocalForwardPubkey({
+    required String host,
+    required int port,
+    required String username,
+    required String privateKeyPath,
+    String? passphrase,
+    required JumpHost jump,
+    required String localAddr,
+    required int localPort,
+    required String remoteHost,
+    required int remotePort,
+  });
 
   Future<BigInt> crateApiSftpOpenSftpAgent({
     required String host,
@@ -191,6 +218,8 @@ abstract class RustLibApi extends BaseApi {
     required BigInt sessionId,
     required List<int> data,
   });
+
+  Future<void> crateApiForwardStopForward({required BigInt id});
 
   Future<Profile> crateApiProfilesUpsertProfile({required Profile profile});
 }
@@ -304,7 +333,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "init_app", argNames: []);
 
   @override
-  Future<List<Profile>> crateApiProfilesListProfiles() {
+  Future<List<PortForward>> crateApiForwardListForwards() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -313,6 +342,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             generalizedFrbRustBinding,
             serializer,
             funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_port_forward,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiForwardListForwardsConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiForwardListForwardsConstMeta =>
+      const TaskConstMeta(debugName: "list_forwards", argNames: []);
+
+  @override
+  Future<List<Profile>> crateApiProfilesListProfiles() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
             port: port_,
           );
         },
@@ -339,7 +395,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 7,
             port: port_,
           );
         },
@@ -356,6 +412,144 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSettingsLoadSettingsConstMeta =>
       const TaskConstMeta(debugName: "load_settings", argNames: []);
+
+  @override
+  Future<BigInt> crateApiForwardOpenLocalForwardAgent({
+    required String host,
+    required int port,
+    required String username,
+    required JumpHost jump,
+    required String localAddr,
+    required int localPort,
+    required String remoteHost,
+    required int remotePort,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(host, serializer);
+          sse_encode_u_16(port, serializer);
+          sse_encode_String(username, serializer);
+          sse_encode_box_autoadd_jump_host(jump, serializer);
+          sse_encode_String(localAddr, serializer);
+          sse_encode_u_16(localPort, serializer);
+          sse_encode_String(remoteHost, serializer);
+          sse_encode_u_16(remotePort, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_64,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiForwardOpenLocalForwardAgentConstMeta,
+        argValues: [
+          host,
+          port,
+          username,
+          jump,
+          localAddr,
+          localPort,
+          remoteHost,
+          remotePort,
+        ],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiForwardOpenLocalForwardAgentConstMeta =>
+      const TaskConstMeta(
+        debugName: "open_local_forward_agent",
+        argNames: [
+          "host",
+          "port",
+          "username",
+          "jump",
+          "localAddr",
+          "localPort",
+          "remoteHost",
+          "remotePort",
+        ],
+      );
+
+  @override
+  Future<BigInt> crateApiForwardOpenLocalForwardPubkey({
+    required String host,
+    required int port,
+    required String username,
+    required String privateKeyPath,
+    String? passphrase,
+    required JumpHost jump,
+    required String localAddr,
+    required int localPort,
+    required String remoteHost,
+    required int remotePort,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(host, serializer);
+          sse_encode_u_16(port, serializer);
+          sse_encode_String(username, serializer);
+          sse_encode_String(privateKeyPath, serializer);
+          sse_encode_opt_String(passphrase, serializer);
+          sse_encode_box_autoadd_jump_host(jump, serializer);
+          sse_encode_String(localAddr, serializer);
+          sse_encode_u_16(localPort, serializer);
+          sse_encode_String(remoteHost, serializer);
+          sse_encode_u_16(remotePort, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_64,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiForwardOpenLocalForwardPubkeyConstMeta,
+        argValues: [
+          host,
+          port,
+          username,
+          privateKeyPath,
+          passphrase,
+          jump,
+          localAddr,
+          localPort,
+          remoteHost,
+          remotePort,
+        ],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiForwardOpenLocalForwardPubkeyConstMeta =>
+      const TaskConstMeta(
+        debugName: "open_local_forward_pubkey",
+        argNames: [
+          "host",
+          "port",
+          "username",
+          "privateKeyPath",
+          "passphrase",
+          "jump",
+          "localAddr",
+          "localPort",
+          "remoteHost",
+          "remotePort",
+        ],
+      );
 
   @override
   Future<BigInt> crateApiSftpOpenSftpAgent({
@@ -375,7 +569,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 10,
             port: port_,
           );
         },
@@ -417,7 +611,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 11,
             port: port_,
           );
         },
@@ -466,7 +660,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 12,
             port: port_,
           );
         },
@@ -512,7 +706,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 13,
             port: port_,
           );
         },
@@ -559,7 +753,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 14,
             port: port_,
           );
         },
@@ -599,7 +793,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 15,
             port: port_,
           );
         },
@@ -637,7 +831,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 16,
             port: port_,
           );
         },
@@ -665,7 +859,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 17,
             port: port_,
           );
         },
@@ -699,7 +893,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 18,
             port: port_,
           );
         },
@@ -729,7 +923,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 19,
             port: port_,
           );
         },
@@ -761,7 +955,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 20,
             port: port_,
           );
         },
@@ -795,7 +989,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 21,
             port: port_,
           );
         },
@@ -831,7 +1025,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 22,
             port: port_,
           );
         },
@@ -867,7 +1061,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 23,
             port: port_,
           );
         },
@@ -897,7 +1091,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 24,
             port: port_,
           );
         },
@@ -930,7 +1124,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 22,
+              funcId: 25,
               port: port_,
             );
           },
@@ -969,7 +1163,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1003,7 +1197,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1024,6 +1218,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<void> crateApiForwardStopForward({required BigInt id}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_64(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 28,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiForwardStopForwardConstMeta,
+        argValues: [id],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiForwardStopForwardConstMeta =>
+      const TaskConstMeta(debugName: "stop_forward", argNames: ["id"]);
+
+  @override
   Future<Profile> crateApiProfilesUpsertProfile({required Profile profile}) {
     return handler.executeNormal(
       NormalTask(
@@ -1033,7 +1255,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1170,6 +1392,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<PortForward> dco_decode_list_port_forward(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_port_forward).toList();
+  }
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as List<int>;
@@ -1197,6 +1425,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  PortForward dco_decode_port_forward(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return PortForward(
+      id: dco_decode_u_64(arr[0]),
+      localAddr: dco_decode_String(arr[1]),
+      localPort: dco_decode_u_16(arr[2]),
+      remoteHost: dco_decode_String(arr[3]),
+      remotePort: dco_decode_u_16(arr[4]),
+    );
   }
 
   @protected
@@ -1419,6 +1662,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<PortForward> sse_decode_list_port_forward(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <PortForward>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_port_forward(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -1465,6 +1720,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  PortForward sse_decode_port_forward(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_u_64(deserializer);
+    var var_localAddr = sse_decode_String(deserializer);
+    var var_localPort = sse_decode_u_16(deserializer);
+    var var_remoteHost = sse_decode_String(deserializer);
+    var var_remotePort = sse_decode_u_16(deserializer);
+    return PortForward(
+      id: var_id,
+      localAddr: var_localAddr,
+      localPort: var_localPort,
+      remoteHost: var_remoteHost,
+      remotePort: var_remotePort,
+    );
   }
 
   @protected
@@ -1702,6 +1974,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_port_forward(
+    List<PortForward> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_port_forward(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_u_8_loose(
     List<int> self,
     SseSerializer serializer,
@@ -1752,6 +2036,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_String(self, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_port_forward(PortForward self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.id, serializer);
+    sse_encode_String(self.localAddr, serializer);
+    sse_encode_u_16(self.localPort, serializer);
+    sse_encode_String(self.remoteHost, serializer);
+    sse_encode_u_16(self.remotePort, serializer);
   }
 
   @protected

@@ -3,6 +3,7 @@
 // matching Dart API. Implementations forward to `tindra-core` (the real
 // engine) so this layer stays a thin, allocation-cheap shim.
 
+pub mod forward;
 pub mod hello;
 pub mod profiles;
 pub mod settings;

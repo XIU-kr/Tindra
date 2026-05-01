@@ -412,6 +412,129 @@ pub async fn open_session_agent(
 pub type SshHandle = Handle<TofuHandler>;
 
 // ---------------------------------------------------------------------------
+// Phase 5 — local port forwarding (-L)
+// ---------------------------------------------------------------------------
+
+/// One active local-forward listener. Cancelling its task tears down the
+/// TcpListener and drops the SSH session held in the worker.
+pub struct ForwardInfo {
+    pub id: u64,
+    pub local_addr: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+struct ActiveForward {
+    info: ForwardInfo,
+    cancel: tokio::sync::oneshot::Sender<()>,
+}
+
+fn forward_registry() -> &'static Mutex<HashMap<u64, ActiveForward>> {
+    static R: OnceLock<Mutex<HashMap<u64, ActiveForward>>> = OnceLock::new();
+    R.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_forward_id() -> u64 {
+    static N: AtomicU64 = AtomicU64::new(1);
+    N.fetch_add(1, Ordering::SeqCst)
+}
+
+/// Start a local-forward: anything that connects to (local_addr, local_port)
+/// gets its bytes shovelled to (remote_host, remote_port) via the SSH server.
+/// `handle` and `jump_handle` are kept alive inside the background task.
+pub async fn start_local_forward(
+    handle: SshHandle,
+    jump_handle: Option<SshHandle>,
+    local_addr: String,
+    local_port: u16,
+    remote_host: String,
+    remote_port: u16,
+) -> Result<u64, SshError> {
+    let listener = tokio::net::TcpListener::bind(format!("{local_addr}:{local_port}"))
+        .await?;
+    let actual_port = listener.local_addr()?.port();
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let id = next_forward_id();
+    let remote_host_clone = remote_host.clone();
+    let shared_handle = Arc::new(handle);
+
+    tokio::spawn(async move {
+        let _keep_jump = jump_handle;
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => break,
+                accept = listener.accept() => {
+                    let (stream, peer) = match accept {
+                        Ok(v) => v,
+                        Err(_) => break,
+                    };
+                    let h = shared_handle.clone();
+                    let host = remote_host_clone.clone();
+                    tokio::spawn(async move {
+                        let channel = match h
+                            .channel_open_direct_tcpip(
+                                host,
+                                remote_port as u32,
+                                peer.ip().to_string(),
+                                peer.port() as u32,
+                            )
+                            .await
+                        {
+                            Ok(c) => c,
+                            Err(_) => return,
+                        };
+                        let mut ch_stream = channel.into_stream();
+                        let mut tcp_stream = stream;
+                        let _ = tokio::io::copy_bidirectional(
+                            &mut tcp_stream,
+                            &mut ch_stream,
+                        )
+                        .await;
+                    });
+                }
+            }
+        }
+    });
+
+    forward_registry().lock().await.insert(
+        id,
+        ActiveForward {
+            info: ForwardInfo {
+                id,
+                local_addr,
+                local_port: actual_port,
+                remote_host,
+                remote_port,
+            },
+            cancel: cancel_tx,
+        },
+    );
+    Ok(id)
+}
+
+pub async fn list_forwards() -> Vec<ForwardInfo> {
+    let guard = forward_registry().lock().await;
+    guard
+        .values()
+        .map(|f| ForwardInfo {
+            id: f.info.id,
+            local_addr: f.info.local_addr.clone(),
+            local_port: f.info.local_port,
+            remote_host: f.info.remote_host.clone(),
+            remote_port: f.info.remote_port,
+        })
+        .collect()
+}
+
+pub async fn stop_forward(id: u64) -> Result<(), SshError> {
+    if let Some(f) = forward_registry().lock().await.remove(&id) {
+        let _ = f.cancel.send(());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Phase 4.0 — agent-based auth
 // ---------------------------------------------------------------------------
 

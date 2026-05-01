@@ -3,6 +3,7 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/forward.dart';
 import 'api/hello.dart';
 import 'api/profiles.dart';
 import 'api/settings.dart';
@@ -67,6 +68,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Cell> dco_decode_list_cell(dynamic raw);
 
   @protected
+  List<PortForward> dco_decode_list_port_forward(dynamic raw);
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
@@ -80,6 +84,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  PortForward dco_decode_port_forward(dynamic raw);
 
   @protected
   Profile dco_decode_profile(dynamic raw);
@@ -153,6 +160,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Cell> sse_decode_list_cell(SseDeserializer deserializer);
 
   @protected
+  List<PortForward> sse_decode_list_port_forward(SseDeserializer deserializer);
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
@@ -166,6 +176,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  PortForward sse_decode_port_forward(SseDeserializer deserializer);
 
   @protected
   Profile sse_decode_profile(SseDeserializer deserializer);
@@ -246,6 +259,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_cell(List<Cell> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_port_forward(
+    List<PortForward> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
@@ -265,6 +284,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_port_forward(PortForward self, SseSerializer serializer);
 
   @protected
   void sse_encode_profile(Profile self, SseSerializer serializer);

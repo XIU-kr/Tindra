@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
 
+import 'package:tindra_desktop/src/rust/api/forward.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/settings.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/sftp.dart' as rust;
@@ -577,6 +578,13 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 
+  Future<void> _openForwardDialog(rust.Profile profile) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _ForwardDialog(profile: profile),
+    );
+  }
+
   Future<void> _openSftpDialog(rust.Profile profile) async {
     await showDialog<void>(
       context: context,
@@ -808,6 +816,12 @@ class _ShellScreenState extends State<ShellScreen> {
           onPressed: () => _openSftpDialog(p),
           icon: const Icon(Icons.folder_shared, size: 16),
           label: const Text('SFTP browser'),
+        ),
+        const SizedBox(height: 6),
+        OutlinedButton.icon(
+          onPressed: () => _openForwardDialog(p),
+          icon: const Icon(Icons.cable, size: 16),
+          label: const Text('Port forwards'),
         ),
       ],
     );
@@ -1399,6 +1413,209 @@ class _ProfileDialogState extends State<_ProfileDialog> {
 
 extension<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
+}
+
+// ---------------------- Phase 5 — port-forward dialog ----------------------
+
+class _ForwardDialog extends StatefulWidget {
+  const _ForwardDialog({required this.profile});
+  final rust.Profile profile;
+
+  @override
+  State<_ForwardDialog> createState() => _ForwardDialogState();
+}
+
+class _ForwardDialogState extends State<_ForwardDialog> {
+  final _localAddr = TextEditingController(text: '127.0.0.1');
+  final _localPort = TextEditingController(text: '0');
+  final _remoteHost = TextEditingController();
+  final _remotePort = TextEditingController(text: '22');
+  bool _busy = false;
+  String? _error;
+  List<rust.PortForward> _forwards = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    _localAddr.dispose();
+    _localPort.dispose();
+    _remoteHost.dispose();
+    _remotePort.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    final list = await rust.listForwards();
+    if (mounted) setState(() => _forwards = list);
+  }
+
+  Future<void> _open() async {
+    final p = widget.profile;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final jump = rust.JumpHost(
+        host: p.jumpHost,
+        port: p.jumpPort == 0 ? 22 : p.jumpPort,
+        username: p.jumpUsername,
+        privateKeyPath: p.jumpPrivateKeyPath,
+        passphrase: null,
+      );
+      final lp = int.tryParse(_localPort.text.trim()) ?? 0;
+      final rp = int.tryParse(_remotePort.text.trim()) ?? 22;
+      if (p.authMethod == 'agent') {
+        await rust.openLocalForwardAgent(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          jump: jump,
+          localAddr: _localAddr.text.trim(),
+          localPort: lp,
+          remoteHost: _remoteHost.text.trim(),
+          remotePort: rp,
+        );
+      } else {
+        await rust.openLocalForwardPubkey(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          privateKeyPath: p.privateKeyPath,
+          passphrase: null,
+          jump: jump,
+          localAddr: _localAddr.text.trim(),
+          localPort: lp,
+          remoteHost: _remoteHost.text.trim(),
+          remotePort: rp,
+        );
+      }
+      await _refresh();
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _stop(rust.PortForward f) async {
+    await rust.stopForward(id: f.id);
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Port forwards — ${widget.profile.name}'),
+      content: SizedBox(
+        width: 560,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Add a local forward (-L)',
+                style: TextStyle(
+                    fontSize: 12, color: Color(0xFF8AA0B5))),
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(
+                  child: TextField(
+                      controller: _localAddr,
+                      decoration:
+                          const InputDecoration(hintText: 'Local addr'))),
+              const SizedBox(width: 8),
+              SizedBox(
+                  width: 90,
+                  child: TextField(
+                      controller: _localPort,
+                      decoration:
+                          const InputDecoration(hintText: 'Port'))),
+            ]),
+            const SizedBox(height: 6),
+            const Icon(Icons.south, size: 14),
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(
+                  child: TextField(
+                      controller: _remoteHost,
+                      decoration: const InputDecoration(
+                          hintText: 'Remote host (relative to SSH server)'))),
+              const SizedBox(width: 8),
+              SizedBox(
+                  width: 90,
+                  child: TextField(
+                      controller: _remotePort,
+                      decoration:
+                          const InputDecoration(hintText: 'Port'))),
+            ]),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: _busy ? null : _open,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Open forward'),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 6),
+              Text(_error!,
+                  style: const TextStyle(
+                      color: Color(0xFFFFB4B4), fontSize: 12)),
+            ],
+            const Divider(height: 24),
+            Row(children: [
+              const Expanded(
+                child: Text('Active forwards',
+                    style: TextStyle(
+                        fontSize: 12, color: Color(0xFF8AA0B5))),
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 16),
+                onPressed: _refresh,
+              ),
+            ]),
+            const SizedBox(height: 4),
+            if (_forwards.isEmpty)
+              const Text('(none)',
+                  style: TextStyle(
+                      fontSize: 12, color: Color(0xFF8AA0B5)))
+            else
+              ..._forwards.map((f) => _row(f)),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close')),
+      ],
+    );
+  }
+
+  Widget _row(rust.PortForward f) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        Expanded(
+          child: Text(
+            '${f.localAddr}:${f.localPort} → ${f.remoteHost}:${f.remotePort}',
+            style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.stop_circle_outlined, size: 18),
+          tooltip: 'Stop',
+          onPressed: () => _stop(f),
+        ),
+      ]),
+    );
+  }
 }
 
 // ---------------------- Phase 6 — SFTP browser ----------------------
