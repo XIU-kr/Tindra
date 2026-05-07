@@ -17,3 +17,4 @@ thiserror.workspace  = true
 tracing.workspace    = true
 zeroize.workspace    = true
 russh.workspace      = true
+tindra-store         = { path = "../tindra-store" }

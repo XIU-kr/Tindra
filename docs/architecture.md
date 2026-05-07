@@ -52,7 +52,7 @@ A single codebase delivering:
 
 | Crate | Responsibility |
 |---|---|
-| `tindra-core` | Public FFI surface. The only crate `flutter_rust_bridge` sees. Re-exports types from sibling crates. |
+| `tindra-core` | Core facade and long-term public FFI surface. Today the desktop app uses `apps/desktop/rust` as a thin `flutter_rust_bridge` shim into this crate. |
 | `tindra-ssh` | SSH transport. Sessions, channels, key auth, jump-host chains, port forwarding. |
 | `tindra-pty` | Local PTY for "Local Shell" tabs (ConPTY/winpty/POSIX). |
 | `tindra-sftp` | SFTP client and transfer queue (concurrent, pause/resume). |
@@ -64,6 +64,8 @@ A single codebase delivering:
 | `tindra-plug` | WASM plugin host (`wasmtime` + WIT component model). |
 
 ## Roadmap (phased)
+
+Current implementation status is tracked in [`status.md`](status.md). The codebase already contains substantial Desktop MVP pieces, while several roadmap items below remain incomplete or prototype-level.
 
 | Phase | Outcome |
 |---|---|

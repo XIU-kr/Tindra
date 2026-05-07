@@ -30,6 +30,13 @@ pub enum StoreError {
     NoDataDir,
     #[error("profile {0} not found")]
     NotFound(String),
+    #[error("host key changed for {host}:{port}: expected {expected}, got {actual}")]
+    HostKeyChanged {
+        host: String,
+        port: u16,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// User-editable settings: theme, terminal font, and shortcut bindings.
@@ -48,6 +55,9 @@ pub struct Settings {
     /// Quake mode global hotkey (e.g. "F12"). Empty disables.
     #[serde(default)]
     pub quake_hotkey: String,
+    /// "system" (default), "en", or "ko".
+    #[serde(default = "default_locale")]
+    pub locale: String,
 }
 
 impl Default for Settings {
@@ -57,6 +67,7 @@ impl Default for Settings {
             font_family: default_font_family(),
             font_size: default_font_size(),
             quake_hotkey: String::new(),
+            locale: default_locale(),
         }
     }
 }
@@ -69,6 +80,9 @@ fn default_font_family() -> String {
 }
 fn default_font_size() -> f32 {
     13.0
+}
+fn default_locale() -> String {
+    "system".to_string()
 }
 
 /// One saved SSH connection. Passphrases are NOT persisted — Phase 4 will add
@@ -116,10 +130,23 @@ fn default_port() -> u16 {
     22
 }
 
+/// Trust-on-first-use host key record. `fingerprint` is the stable SHA256
+/// string produced by russh/ssh-key, e.g. `SHA256:...`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostKeyEntry {
+    pub host: String,
+    pub port: u16,
+    pub fingerprint: String,
+    pub first_seen_unix_ms: u128,
+    pub last_seen_unix_ms: u128,
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct OnDisk {
     #[serde(default)]
     profiles: Vec<Profile>,
+    #[serde(default)]
+    host_keys: Vec<HostKeyEntry>,
 }
 
 struct Inner {
@@ -215,6 +242,79 @@ pub async fn delete_profile(id: String) -> Result<(), StoreError> {
 pub async fn store_path() -> Result<PathBuf, StoreError> {
     let guard = ensure_loaded().await?;
     Ok(guard.as_ref().unwrap().path.clone())
+}
+
+// ---------------------------------------------------------------------------
+// Host key trust-on-first-use store
+// ---------------------------------------------------------------------------
+
+fn now_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// Verify a server key fingerprint using trust-on-first-use semantics.
+///
+/// - First time seeing `host:port`: stores the fingerprint and returns Ok.
+/// - Subsequent matching key: updates `last_seen_unix_ms` and returns Ok.
+/// - Changed key: returns `HostKeyChanged` and does not overwrite.
+pub async fn verify_or_trust_host_key(
+    host: String,
+    port: u16,
+    fingerprint: String,
+) -> Result<(), StoreError> {
+    let mut guard = ensure_loaded().await?;
+    let inner = guard.as_mut().unwrap();
+    if let Some(existing) = inner
+        .data
+        .host_keys
+        .iter_mut()
+        .find(|k| k.host == host && k.port == port)
+    {
+        if existing.fingerprint != fingerprint {
+            return Err(StoreError::HostKeyChanged {
+                host,
+                port,
+                expected: existing.fingerprint.clone(),
+                actual: fingerprint,
+            });
+        }
+        existing.last_seen_unix_ms = now_unix_ms();
+    } else {
+        let now = now_unix_ms();
+        inner.data.host_keys.push(HostKeyEntry {
+            host,
+            port,
+            fingerprint,
+            first_seen_unix_ms: now,
+            last_seen_unix_ms: now,
+        });
+    }
+    persist(inner).await?;
+    Ok(())
+}
+
+pub async fn list_host_keys() -> Result<Vec<HostKeyEntry>, StoreError> {
+    let guard = ensure_loaded().await?;
+    let mut out = guard.as_ref().unwrap().data.host_keys.clone();
+    out.sort_by(|a, b| (a.host.to_lowercase(), a.port).cmp(&(b.host.to_lowercase(), b.port)));
+    Ok(out)
+}
+
+pub async fn delete_host_key(host: String, port: u16) -> Result<(), StoreError> {
+    let mut guard = ensure_loaded().await?;
+    let inner = guard.as_mut().unwrap();
+    let before = inner.data.host_keys.len();
+    inner
+        .data
+        .host_keys
+        .retain(|k| !(k.host == host && k.port == port));
+    if inner.data.host_keys.len() != before {
+        persist(inner).await?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

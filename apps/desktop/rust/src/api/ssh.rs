@@ -126,11 +126,18 @@ impl From<CoreSnapshot> for TerminalSnapshot {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionBackend {
+    Ssh,
+    LocalPty,
+}
+
 /// Per-session metadata held in the bridge crate.
 struct SessionMeta {
     /// vt100 parser for this session's screen state. Shared so shell_resize
     /// can update its dimensions while shell_output_stream keeps reading.
     parser: Arc<Mutex<Parser>>,
+    backend: SessionBackend,
 }
 
 fn meta_registry() -> &'static Mutex<HashMap<u64, SessionMeta>> {
@@ -196,7 +203,25 @@ pub async fn open_shell_pubkey(
     meta_registry()
         .lock()
         .await
-        .insert(id, SessionMeta { parser });
+        .insert(id, SessionMeta { parser, backend: SessionBackend::Ssh });
+    Ok(id)
+}
+
+/// Open a local shell using the platform PTY (Windows ConPTY/winpty,
+/// POSIX PTY elsewhere). Empty `shell` uses the platform default.
+pub async fn open_local_shell(
+    shell: Option<String>,
+    cols: u32,
+    rows: u32,
+) -> Result<u64, String> {
+    let id = tindra_core::pty::open_local_shell(shell, cols, rows)
+        .await
+        .map_err(|e| e.to_string())?;
+    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
+    meta_registry()
+        .lock()
+        .await
+        .insert(id, SessionMeta { parser, backend: SessionBackend::LocalPty });
     Ok(id)
 }
 
@@ -214,7 +239,7 @@ pub async fn open_shell_telnet(
     meta_registry()
         .lock()
         .await
-        .insert(id, SessionMeta { parser });
+        .insert(id, SessionMeta { parser, backend: SessionBackend::Ssh });
     Ok(id)
 }
 
@@ -234,7 +259,7 @@ pub async fn open_shell_agent(
     meta_registry()
         .lock()
         .await
-        .insert(id, SessionMeta { parser });
+        .insert(id, SessionMeta { parser, backend: SessionBackend::Ssh });
     Ok(id)
 }
 
@@ -245,18 +270,18 @@ pub async fn shell_output_stream(
     session_id: u64,
     sink: StreamSink<TerminalSnapshot>,
 ) -> Result<(), String> {
-    let parser = {
+    let (parser, backend) = {
         let reg = meta_registry().lock().await;
         let meta = reg
             .get(&session_id)
             .ok_or_else(|| format!("session {session_id} unknown"))?;
-        meta.parser.clone()
+        (meta.parser.clone(), meta.backend)
     };
-    let mut rx = tindra_core::ssh::take_output_receiver(session_id)
-        .await
-        .ok_or_else(|| {
-            format!("session {session_id} not found or already subscribed")
-        })?;
+    let mut rx = match backend {
+        SessionBackend::Ssh => tindra_core::ssh::take_output_receiver(session_id).await,
+        SessionBackend::LocalPty => tindra_core::pty::take_output_receiver(session_id).await,
+    }
+    .ok_or_else(|| format!("session {session_id} not found or already subscribed"))?;
 
     while let Some(chunk) = rx.recv().await {
         let snapshot: TerminalSnapshot = {
@@ -274,17 +299,35 @@ pub async fn shell_output_stream(
 }
 
 pub async fn shell_write(session_id: u64, data: Vec<u8>) -> Result<(), String> {
-    tindra_core::ssh::shell_write(session_id, data)
-        .await
-        .map_err(|e| e.to_string())
+    let backend = {
+        let reg = meta_registry().lock().await;
+        reg.get(&session_id).map(|m| m.backend).unwrap_or(SessionBackend::Ssh)
+    };
+    match backend {
+        SessionBackend::Ssh => tindra_core::ssh::shell_write(session_id, data)
+            .await
+            .map_err(|e| e.to_string()),
+        SessionBackend::LocalPty => tindra_core::pty::local_shell_write(session_id, data)
+            .await
+            .map_err(|e| e.to_string()),
+    }
 }
 
 /// Resize the remote PTY *and* the local vt100 parser so the next snapshot
 /// reflects the new geometry.
 pub async fn shell_resize(session_id: u64, cols: u32, rows: u32) -> Result<(), String> {
-    tindra_core::ssh::shell_resize(session_id, cols, rows)
-        .await
-        .map_err(|e| e.to_string())?;
+    let backend = {
+        let reg = meta_registry().lock().await;
+        reg.get(&session_id).map(|m| m.backend).unwrap_or(SessionBackend::Ssh)
+    };
+    match backend {
+        SessionBackend::Ssh => tindra_core::ssh::shell_resize(session_id, cols, rows)
+            .await
+            .map_err(|e| e.to_string())?,
+        SessionBackend::LocalPty => tindra_core::pty::local_shell_resize(session_id, cols, rows)
+            .await
+            .map_err(|e| e.to_string())?,
+    }
     if let Some(meta) = meta_registry().lock().await.get(&session_id) {
         meta.parser
             .lock()
@@ -296,8 +339,18 @@ pub async fn shell_resize(session_id: u64, cols: u32, rows: u32) -> Result<(), S
 }
 
 pub async fn shell_close(session_id: u64) -> Result<(), String> {
-    let _ = meta_registry().lock().await.remove(&session_id);
-    tindra_core::ssh::shell_close(session_id)
+    let backend = meta_registry()
+        .lock()
         .await
-        .map_err(|e| e.to_string())
+        .remove(&session_id)
+        .map(|m| m.backend)
+        .unwrap_or(SessionBackend::Ssh);
+    match backend {
+        SessionBackend::Ssh => tindra_core::ssh::shell_close(session_id)
+            .await
+            .map_err(|e| e.to_string()),
+        SessionBackend::LocalPty => tindra_core::pty::local_shell_close(session_id)
+            .await
+            .map_err(|e| e.to_string()),
+    }
 }

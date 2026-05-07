@@ -67,6 +67,7 @@ void main() {
       fontFamily: 'Cascadia Mono',
       fontSize: 16.0,
       quakeHotkey: 'F12',
+      locale: 'ko',
     );
     await rust.saveSettings(settings: wanted);
     expect(settingsFile.existsSync(), isTrue,
@@ -77,6 +78,7 @@ void main() {
     expect(loaded.fontFamily, 'Cascadia Mono');
     expect(loaded.fontSize, 16.0);
     expect(loaded.quakeHotkey, 'F12');
+    expect(loaded.locale, 'ko');
   });
 
   test('Settings load returns defaults when file missing', () async {

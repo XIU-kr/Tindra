@@ -48,7 +48,7 @@ toml = "0.8"
 russh = "0.45"
 russh-sftp = "2"
 zmodem2 = "0.5"
-# portable-pty  = "0.8"
+portable-pty  = "0.8"
 
 # Terminal
 # alacritty_terminal = "0.22"

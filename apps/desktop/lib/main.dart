@@ -10,10 +10,12 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import 'dart:io';
 
+import 'package:tindra_desktop/l10n/app_localizations.dart';
 import 'package:tindra_desktop/src/rust/api/forward.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/settings.dart' as rust;
@@ -107,11 +109,117 @@ LogicalKeyboardKey? _parseHotkey(String s) {
 final ValueNotifier<rust.Settings> appSettings = ValueNotifier(
   const rust.Settings(
     theme: 'dark',
-    fontFamily: 'Consolas',
+    fontFamily: 'Cascadia Mono',
     fontSize: 13.0,
     quakeHotkey: '',
+    locale: 'system',
   ),
 );
+
+// ============================================================================
+// Phosphor Console — design tokens
+// ----------------------------------------------------------------------------
+// A retro-futuristic terminal aesthetic: deep teal-black canvas, mint phosphor
+// accent, warm amber for liminal states, coral for errors. Brutalist geometry
+// (4–12px corners), characterful mono typography, control-panel signaling.
+// ============================================================================
+
+class _Pal {
+  // Dark
+  static const ink = Color(0xFF06100D); // canvas / body bg
+  static const inkDeep = Color(0xFF030806); // gradient terminus
+  static const surface = Color(0xFF0E1916); // primary panel
+  static const surfaceHi = Color(0xFF152521); // raised tiles, tabs
+  static const surfaceLo = Color(0xFF0A1411); // recessed wells
+  static const divider = Color(0xFF1E332C);
+  static const dividerHi = Color(0xFF2B4A41);
+
+  static const phosphor = Color(0xFF7CEAB6); // primary mint
+  static const phosphorDim = Color(0xFF49957A);
+  static const amber = Color(0xFFFFB069); // connecting / warning
+  static const coral = Color(0xFFFF7B6E); // error / disconnected
+
+  static const chalk = Color(0xFFE8F1ED); // primary text
+  static const moss = Color(0xFF8AA89C); // secondary text
+  static const slate = Color(0xFF5C7A6F); // tertiary text / hint
+
+  // Light (paper terminal)
+  static const paper = Color(0xFFF1ECDD);
+  static const paperSurface = Color(0xFFFBF7E9);
+  static const paperHi = Color(0xFFFFFFFF);
+  static const paperInk = Color(0xFF14241F);
+  static const paperPhos = Color(0xFF0F6A48);
+  static const paperAmber = Color(0xFFB85F1A);
+  static const paperCoral = Color(0xFFC23E2D);
+  static const paperMoss = Color(0xFF5F7569);
+  static const paperDivider = Color(0xFFD9D1B8);
+}
+
+bool get _isLight => appSettings.value.theme == 'light';
+
+Color get _bgInk => _isLight ? _Pal.paper : _Pal.ink;
+Color get _bgInkDeep => _isLight ? _Pal.paper : _Pal.inkDeep;
+Color get _bgSurface => _isLight ? _Pal.paperSurface : _Pal.surface;
+Color get _bgSurfaceHi => _isLight ? _Pal.paperHi : _Pal.surfaceHi;
+Color get _bgSurfaceLo =>
+    _isLight ? const Color(0xFFE8E2CC) : _Pal.surfaceLo;
+Color get _divider => _isLight ? _Pal.paperDivider : _Pal.divider;
+Color get _dividerHi =>
+    _isLight ? const Color(0xFFC9BFA0) : _Pal.dividerHi;
+
+Color get _accent => _isLight ? _Pal.paperPhos : _Pal.phosphor;
+Color get _accentDim => _isLight ? const Color(0xFF6FA28C) : _Pal.phosphorDim;
+Color get _amber => _isLight ? _Pal.paperAmber : _Pal.amber;
+Color get _coral => _isLight ? _Pal.paperCoral : _Pal.coral;
+
+Color get _textHi => _isLight ? _Pal.paperInk : _Pal.chalk;
+Color get _textMid => _isLight ? _Pal.paperMoss : _Pal.moss;
+Color get _textLow =>
+    _isLight ? const Color(0xFF87856E) : _Pal.slate;
+
+Color get _termFg => _textHi;
+Color get _termBg => _isLight ? _Pal.paperHi : const Color(0xFF050B09);
+
+const List<String> _terminalFontFallback = [
+  'Cascadia Mono',
+  'Cascadia Code',
+  'D2Coding',
+  'Consolas',
+  'Malgun Gothic',
+  'Noto Sans Mono CJK KR',
+];
+
+const List<String> _displayMono = [
+  'Cascadia Mono',
+  'Cascadia Code',
+  'Consolas',
+  'Courier New',
+];
+
+const List<String> _uiSans = [
+  'Segoe UI Variable',
+  'Segoe UI',
+  'Malgun Gothic',
+  'Roboto',
+];
+
+TextStyle get _termStyle => TextStyle(
+      fontFamily: appSettings.value.fontFamily,
+      fontFamilyFallback: _terminalFontFallback,
+      fontSize: appSettings.value.fontSize,
+      height: 1.35,
+      color: _termFg,
+    );
+
+TextStyle get _monoLabel => TextStyle(
+      fontFamily: 'Cascadia Mono',
+      fontFamilyFallback: _displayMono,
+      fontSize: 10.5,
+      height: 1.0,
+      letterSpacing: 1.6,
+      fontWeight: FontWeight.w600,
+      color: _textMid,
+    );
 
 class TindraApp extends StatelessWidget {
   const TindraApp({super.key});
@@ -120,36 +228,250 @@ class TindraApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<rust.Settings>(
       valueListenable: appSettings,
-      builder: (_, settings, __) {
+      builder: (context, settings, child) {
         final isLight = settings.theme == 'light';
-        final base = isLight ? ThemeData.light(useMaterial3: true) : ThemeData.dark(useMaterial3: true);
+        final base = isLight
+            ? ThemeData.light(useMaterial3: true)
+            : ThemeData.dark(useMaterial3: true);
+        final accent = isLight ? _Pal.paperPhos : _Pal.phosphor;
+        final scaffold = isLight ? _Pal.paper : _Pal.ink;
+        final surface = isLight ? _Pal.paperSurface : _Pal.surface;
+        final ink = isLight ? _Pal.paperInk : _Pal.chalk;
         return MaterialApp(
           title: 'Tindra',
           debugShowCheckedModeBanner: false,
+          locale: settings.locale == 'system' ? null : Locale(settings.locale),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
           theme: base.copyWith(
-            scaffoldBackgroundColor:
-                isLight ? const Color(0xFFF6F8FB) : const Color(0xFF0E1014),
+            scaffoldBackgroundColor: scaffold,
             colorScheme: isLight
                 ? const ColorScheme.light(
-                    primary: Color(0xFF1F6FB2),
-                    surface: Color(0xFFFFFFFF),
-                    onSurface: Color(0xFF1B2030),
+                    primary: _Pal.paperPhos,
+                    onPrimary: Colors.white,
+                    secondary: _Pal.paperAmber,
+                    surface: _Pal.paperSurface,
+                    onSurface: _Pal.paperInk,
+                    error: _Pal.paperCoral,
                   )
                 : const ColorScheme.dark(
-                    primary: Color(0xFF7AC0FF),
-                    surface: Color(0xFF161A22),
-                    onSurface: Color(0xFFE3E9F1),
+                    primary: _Pal.phosphor,
+                    onPrimary: _Pal.ink,
+                    secondary: _Pal.amber,
+                    surface: _Pal.surface,
+                    onSurface: _Pal.chalk,
+                    error: _Pal.coral,
                   ),
+            textTheme: base.textTheme.apply(
+              bodyColor: ink,
+              displayColor: ink,
+              fontFamily: 'Segoe UI Variable',
+              fontFamilyFallback: _uiSans,
+            ),
+            dividerColor: isLight ? _Pal.paperDivider : _Pal.divider,
+            appBarTheme: const AppBarTheme(
+              elevation: 0,
+              centerTitle: false,
+              scrolledUnderElevation: 0,
+              backgroundColor: Colors.transparent,
+            ),
+            iconTheme: IconThemeData(
+              color: isLight ? _Pal.paperMoss : _Pal.moss,
+              size: 18,
+            ),
+            tooltipTheme: TooltipThemeData(
+              textStyle: TextStyle(
+                color: isLight ? _Pal.paperInk : _Pal.chalk,
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 11,
+                letterSpacing: 0.2,
+              ),
+              decoration: BoxDecoration(
+                color: isLight
+                    ? _Pal.paperHi
+                    : const Color(0xFF1A2925),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: isLight ? _Pal.paperDivider : _Pal.dividerHi,
+                ),
+              ),
+            ),
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
-              fillColor:
-                  isLight ? const Color(0xFFE9EEF6) : const Color(0xFF1B2030),
+              fillColor: isLight
+                  ? const Color(0xFFEDE7D2)
+                  : const Color(0xFF0B1714),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
-                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(4),
+                borderSide: BorderSide(
+                  color: isLight ? _Pal.paperDivider : _Pal.divider,
+                  width: 1,
+                ),
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(4),
+                borderSide: BorderSide(
+                  color: isLight ? _Pal.paperDivider : _Pal.divider,
+                  width: 1,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(4),
+                borderSide: BorderSide(color: accent, width: 1.4),
+              ),
+              hintStyle: TextStyle(
+                color: isLight ? _Pal.paperMoss : _Pal.slate,
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
+              ),
+            ),
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: isLight ? Colors.white : _Pal.ink,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                textStyle: const TextStyle(
+                  fontFamily: 'Cascadia Mono',
+                  fontFamilyFallback: _displayMono,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                  fontSize: 12.5,
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ink,
+                side: BorderSide(
+                  color: isLight ? _Pal.paperDivider : _Pal.dividerHi,
+                  width: 1,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                textStyle: const TextStyle(
+                  fontFamily: 'Cascadia Mono',
+                  fontFamilyFallback: _displayMono,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                  fontSize: 12,
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 11,
+                ),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: isLight ? _Pal.paperMoss : _Pal.moss,
+                textStyle: const TextStyle(
+                  fontFamily: 'Cascadia Mono',
+                  fontFamilyFallback: _displayMono,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                  fontSize: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            dialogTheme: DialogThemeData(
+              backgroundColor: surface,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+                side: BorderSide(
+                  color: isLight ? _Pal.paperDivider : _Pal.dividerHi,
+                ),
+              ),
+              titleTextStyle: TextStyle(
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.4,
+                fontSize: 13,
+                color: ink,
+              ),
+            ),
+            dropdownMenuTheme: DropdownMenuThemeData(
+              menuStyle: MenuStyle(
+                backgroundColor: WidgetStatePropertyAll(
+                  isLight ? _Pal.paperHi : const Color(0xFF152521),
+                ),
+                shape: WidgetStatePropertyAll(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    side: BorderSide(
+                      color: isLight ? _Pal.paperDivider : _Pal.dividerHi,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            sliderTheme: SliderThemeData(
+              activeTrackColor: accent,
+              thumbColor: accent,
+              overlayColor: accent.withValues(alpha: 0.12),
+              inactiveTrackColor:
+                  isLight ? _Pal.paperDivider : _Pal.divider,
+              valueIndicatorColor: accent,
+              valueIndicatorTextStyle: TextStyle(
+                color: isLight ? Colors.white : _Pal.ink,
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            switchTheme: SwitchThemeData(
+              thumbColor: WidgetStateProperty.resolveWith(
+                (s) => s.contains(WidgetState.selected)
+                    ? (isLight ? Colors.white : _Pal.ink)
+                    : (isLight ? _Pal.paperMoss : _Pal.moss),
+              ),
+              trackColor: WidgetStateProperty.resolveWith(
+                (s) => s.contains(WidgetState.selected)
+                    ? accent
+                    : (isLight ? _Pal.paperDivider : _Pal.divider),
+              ),
+            ),
+            segmentedButtonTheme: SegmentedButtonThemeData(
+              style: SegmentedButton.styleFrom(
+                backgroundColor: isLight
+                    ? const Color(0xFFEDE7D2)
+                    : const Color(0xFF0B1714),
+                foregroundColor: isLight ? _Pal.paperInk : _Pal.chalk,
+                selectedBackgroundColor: accent,
+                selectedForegroundColor:
+                    isLight ? Colors.white : _Pal.ink,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                textStyle: const TextStyle(
+                  fontFamily: 'Cascadia Mono',
+                  fontFamilyFallback: _displayMono,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                  fontSize: 12,
+                ),
+              ),
             ),
           ),
           home: const ShellScreen(),
@@ -159,18 +481,396 @@ class TindraApp extends StatelessWidget {
   }
 }
 
-Color get _termFg =>
-    appSettings.value.theme == 'light' ? const Color(0xFF1B2030) : const Color(0xFFE3E9F1);
-Color get _termBg =>
-    appSettings.value.theme == 'light' ? const Color(0xFFFAFBFD) : const Color(0xFF0A0C12);
-TextStyle get _termStyle => TextStyle(
-      fontFamily: appSettings.value.fontFamily,
-      fontSize: appSettings.value.fontSize,
-      height: 1.35,
-      color: _termFg,
+/// The Tindra brand mark: a sealed terminal viewport — corner brackets
+/// framing a phosphor `>_` prompt with a softly pulsing cursor block. The
+/// pulse is deliberately slow (1.4s) so it reads as a heartbeat, not an
+/// attention-grabber.
+class _TindraMark extends StatefulWidget {
+  const _TindraMark({this.size = 32});
+  final double size;
+
+  @override
+  State<_TindraMark> createState() => _TindraMarkState();
+}
+
+class _TindraMarkState extends State<_TindraMark>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctl,
+      builder: (_, _) {
+        return SizedBox(
+          width: widget.size,
+          height: widget.size,
+          child: CustomPaint(
+            painter: _TindraMarkPainter(
+              accent: _accent,
+              accentDim: _accentDim,
+              ink: _isLight
+                  ? const Color(0xFFD9D1B8)
+                  : const Color(0xFF0B1714),
+              cursorOpacity:
+                  Curves.easeInOut.transform(_ctl.value) * 0.7 + 0.3,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TindraMarkPainter extends CustomPainter {
+  _TindraMarkPainter({
+    required this.accent,
+    required this.accentDim,
+    required this.ink,
+    required this.cursorOpacity,
+  });
+
+  final Color accent;
+  final Color accentDim;
+  final Color ink;
+  final double cursorOpacity;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Inner viewport
+    final viewport = RRect.fromLTRBR(
+      w * 0.06,
+      h * 0.06,
+      w * 0.94,
+      h * 0.94,
+      Radius.circular(w * 0.10),
+    );
+    canvas.drawRRect(viewport, Paint()..color = ink);
+
+    // Corner brackets (viewfinder)
+    final bracket = Paint()
+      ..color = accent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.07
+      ..strokeCap = StrokeCap.square;
+    final pad = w * 0.14;
+    final arm = w * 0.18;
+    // top-left
+    canvas.drawLine(Offset(pad, pad), Offset(pad + arm, pad), bracket);
+    canvas.drawLine(Offset(pad, pad), Offset(pad, pad + arm), bracket);
+    // top-right
+    canvas.drawLine(Offset(w - pad, pad), Offset(w - pad - arm, pad), bracket);
+    canvas.drawLine(Offset(w - pad, pad), Offset(w - pad, pad + arm), bracket);
+    // bottom-left
+    canvas.drawLine(Offset(pad, h - pad), Offset(pad + arm, h - pad), bracket);
+    canvas.drawLine(Offset(pad, h - pad), Offset(pad, h - pad - arm), bracket);
+    // bottom-right
+    canvas.drawLine(
+        Offset(w - pad, h - pad), Offset(w - pad - arm, h - pad), bracket);
+    canvas.drawLine(
+        Offset(w - pad, h - pad), Offset(w - pad, h - pad - arm), bracket);
+
+    // > chevron prompt
+    final prompt = Paint()
+      ..color = accent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.08
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.miter;
+    final p = Path()
+      ..moveTo(w * 0.34, h * 0.40)
+      ..lineTo(w * 0.48, h * 0.50)
+      ..lineTo(w * 0.34, h * 0.60);
+    canvas.drawPath(p, prompt);
+
+    // cursor block (pulsing)
+    final cursor = Paint()
+      ..color = accent.withValues(alpha: cursorOpacity);
+    canvas.drawRect(
+      Rect.fromLTWH(w * 0.54, h * 0.46, w * 0.16, w * 0.10),
+      cursor,
     );
 
+    // soft outer glow
+    final glow = Paint()
+      ..color = accent.withValues(alpha: 0.08)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.outer, 6);
+    canvas.drawRRect(viewport, glow);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TindraMarkPainter old) =>
+      old.cursorOpacity != cursorOpacity ||
+      old.accent != accent ||
+      old.ink != ink;
+}
+
+/// Background painter: deep gradient + faint dot grid + radial vignette.
+class _PhosphorBackground extends StatelessWidget {
+  const _PhosphorBackground({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _PhosphorBackgroundPainter(
+        ink: _bgInk,
+        inkDeep: _bgInkDeep,
+        dot: _isLight
+            ? _Pal.paperDivider.withValues(alpha: 0.5)
+            : const Color(0xFF12251F),
+        accentTint: _accent.withValues(alpha: _isLight ? 0.04 : 0.05),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _PhosphorBackgroundPainter extends CustomPainter {
+  _PhosphorBackgroundPainter({
+    required this.ink,
+    required this.inkDeep,
+    required this.dot,
+    required this.accentTint,
+  });
+
+  final Color ink;
+  final Color inkDeep;
+  final Color dot;
+  final Color accentTint;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Base gradient: top-left ink -> bottom-right inkDeep
+    final base = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [ink, inkDeep],
+      ).createShader(Offset.zero & size);
+    canvas.drawRect(Offset.zero & size, base);
+
+    // Phosphor wash from upper-left
+    final wash = Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(-0.6, -0.7),
+        radius: 1.4,
+        colors: [accentTint, Colors.transparent],
+      ).createShader(Offset.zero & size);
+    canvas.drawRect(Offset.zero & size, wash);
+
+    // Faint 24px dot grid
+    final dotPaint = Paint()..color = dot;
+    const step = 24.0;
+    for (double x = 0; x < size.width; x += step) {
+      for (double y = 0; y < size.height; y += step) {
+        canvas.drawRect(Rect.fromLTWH(x, y, 1, 1), dotPaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PhosphorBackgroundPainter old) =>
+      old.ink != ink || old.dot != dot;
+}
+
+/// `▌ LABEL` style section header used throughout the sidebar.
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.label, {this.trailing});
+  final String label;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
+      child: Row(
+        children: [
+          Container(width: 3, height: 11, color: _accent),
+          const SizedBox(width: 8),
+          Text(
+            label.toUpperCase(),
+            style: _monoLabel,
+          ),
+          const Spacer(),
+          ?trailing,
+        ],
+      ),
+    );
+  }
+}
+
+/// Pulsing status LED: 6×6 dot with halo. Pulses only while connecting.
+class _StatusLED extends StatefulWidget {
+  const _StatusLED({required this.color, required this.pulsing, this.size = 6});
+  final Color color;
+  final bool pulsing;
+  final double size;
+
+  @override
+  State<_StatusLED> createState() => _StatusLEDState();
+}
+
+class _StatusLEDState extends State<_StatusLED>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.pulsing) _ctl.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _StatusLED old) {
+    super.didUpdateWidget(old);
+    if (widget.pulsing && !_ctl.isAnimating) {
+      _ctl.repeat(reverse: true);
+    } else if (!widget.pulsing && _ctl.isAnimating) {
+      _ctl.stop();
+      _ctl.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctl,
+      builder: (_, _) {
+        final intensity =
+            widget.pulsing ? (0.45 + Curves.easeInOut.transform(_ctl.value) * 0.55) : 1.0;
+        return SizedBox(
+          width: widget.size + 8,
+          height: widget.size + 8,
+          child: Center(
+            child: Container(
+              width: widget.size,
+              height: widget.size,
+              decoration: BoxDecoration(
+                color: widget.color.withValues(alpha: intensity),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: widget.color.withValues(alpha: 0.45 * intensity),
+                    blurRadius: 6,
+                    spreadRadius: 0.5,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Corner brackets framing the terminal viewport.
+class _CornerBrackets extends StatelessWidget {
+  const _CornerBrackets({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: _CornerBracketPainter(color: color, arm: 14),
+        ),
+      ),
+    );
+  }
+}
+
+class _CornerBracketPainter extends CustomPainter {
+  _CornerBracketPainter({required this.color, required this.arm});
+  final Color color;
+  final double arm;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = color
+      ..strokeWidth = 1.4
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.square;
+    final w = size.width;
+    final h = size.height;
+    // tl
+    canvas.drawLine(const Offset(0, 0), Offset(arm, 0), p);
+    canvas.drawLine(const Offset(0, 0), Offset(0, arm), p);
+    // tr
+    canvas.drawLine(Offset(w, 0), Offset(w - arm, 0), p);
+    canvas.drawLine(Offset(w, 0), Offset(w, arm), p);
+    // bl
+    canvas.drawLine(Offset(0, h), Offset(arm, h), p);
+    canvas.drawLine(Offset(0, h), Offset(0, h - arm), p);
+    // br
+    canvas.drawLine(Offset(w, h), Offset(w - arm, h), p);
+    canvas.drawLine(Offset(w, h), Offset(w, h - arm), p);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CornerBracketPainter old) =>
+      old.color != color;
+}
+
+/// Optional scanline overlay on the terminal panel — very low contrast,
+/// ignored on light theme. Does not interfere with hit-testing.
+class _ScanlineOverlay extends StatelessWidget {
+  const _ScanlineOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLight) return const SizedBox.shrink();
+    return IgnorePointer(
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _ScanlinePainter(),
+      ),
+    );
+  }
+}
+
+class _ScanlinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()..color = const Color(0x06000000);
+    for (double y = 0; y < size.height; y += 3) {
+      canvas.drawRect(Rect.fromLTWH(0, y, size.width, 1), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 enum _ConnState { connecting, connected, disconnected }
+
+const String _localShellProfileId = '__local_shell__';
 
 /// One live (or recently-live) SSH session. Held inside _ShellScreenState's
 /// `_tabs` list; the State is a thin shell around mutable fields here so
@@ -262,6 +962,9 @@ class _ShellScreenState extends State<ShellScreen> {
   rust.Profile? get _selectedProfile =>
       _profiles.where((p) => p.id == _selectedProfileId).firstOrNull;
 
+  rust.Profile? _profileById(String id) =>
+      _profiles.where((p) => p.id == id).firstOrNull;
+
   _TabGroup? get _activeGroup =>
       (_activeIdx >= 0 && _activeIdx < _tabs.length) ? _tabs[_activeIdx] : null;
 
@@ -311,23 +1014,26 @@ class _ShellScreenState extends State<ShellScreen> {
   Future<void> _deleteProfile(rust.Profile profile) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete profile?'),
-        content: Text('Permanently remove "${profile.name}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF8B2C2C),
+      builder: (ctx) {
+        final l10n = AppLocalizations.of(ctx);
+        return AlertDialog(
+          title: Text(l10n.deleteProfileQuestion),
+          content: Text(l10n.deleteProfileContent(profile.name)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l10n.cancel),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8B2C2C),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(l10n.delete),
+            ),
+          ],
+        );
+      },
     );
     if (ok != true) return;
     try {
@@ -362,6 +1068,119 @@ class _ShellScreenState extends State<ShellScreen> {
       }
     });
 
+    try {
+      final jump = rust.JumpHost(
+        host: p.jumpHost,
+        port: p.jumpPort == 0 ? 22 : p.jumpPort,
+        username: p.jumpUsername,
+        privateKeyPath: p.jumpPrivateKeyPath,
+        passphrase: null,
+      );
+      final BigInt id;
+      if (p.transport == 'telnet') {
+        id = await rust.openShellTelnet(
+          host: p.host,
+          port: p.port,
+          cols: tab.cols,
+          rows: tab.rows,
+        );
+      } else if (p.authMethod == 'agent') {
+        id = await rust.openShellAgent(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
+        );
+      } else {
+        id = await rust.openShellPubkey(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          privateKeyPath: p.privateKeyPath,
+          passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
+        );
+      }
+      tab.sessionId = id;
+      tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
+        (snap) {
+          tab.snapshot = snap;
+          if (mounted) setState(() {});
+        },
+        onError: (e) {
+          tab.error = e.toString();
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+        },
+        onDone: () {
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+        },
+      );
+      tab.state = _ConnState.connected;
+      if (mounted) setState(() {});
+      _passphrase.clear();
+      _termFocus.requestFocus();
+    } catch (e) {
+      tab.error = e.toString();
+      tab.state = _ConnState.disconnected;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _openLocalShell() async {
+    final tab = _SessionTab(
+      profileId: _localShellProfileId,
+      profileName: 'Local Shell',
+    );
+    setState(() {
+      _tabs.add(_TabGroup(profileName: 'Local Shell', first: tab));
+      _activeIdx = _tabs.length - 1;
+    });
+    await _connectLocalIntoExistingSession(tab);
+  }
+
+  Future<void> _connectLocalIntoExistingSession(_SessionTab tab) async {
+    try {
+      final id = await rust.openLocalShell(
+        shell: null,
+        cols: tab.cols,
+        rows: tab.rows,
+      );
+      tab.sessionId = id;
+      tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
+        (snap) {
+          tab.snapshot = snap;
+          if (mounted) setState(() {});
+        },
+        onError: (e) {
+          tab.error = e.toString();
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+        },
+        onDone: () {
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+        },
+      );
+      tab.state = _ConnState.connected;
+      if (mounted) setState(() {});
+      _termFocus.requestFocus();
+    } catch (e) {
+      tab.error = e.toString();
+      tab.state = _ConnState.disconnected;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _connectIntoExistingSession(
+    rust.Profile p,
+    _SessionTab tab,
+  ) async {
     try {
       final jump = rust.JumpHost(
         host: p.jumpHost,
@@ -472,6 +1291,31 @@ class _ShellScreenState extends State<ShellScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _reconnectActive() async {
+    final group = _activeGroup;
+    final old = _activeTab;
+    if (group == null || old == null) return;
+    if (old.profileId == _localShellProfileId) {
+      await old.dispose();
+      final fresh = _SessionTab(
+        profileId: _localShellProfileId,
+        profileName: 'Local Shell',
+      );
+      setState(() => group.sessions[group.activeIdx] = fresh);
+      await _connectLocalIntoExistingSession(fresh);
+      return;
+    }
+    final profile = _profileById(old.profileId);
+    if (profile == null) return;
+    await old.dispose();
+    final fresh = _SessionTab(profileId: profile.id, profileName: profile.name);
+    setState(() {
+      group.sessions[group.activeIdx] = fresh;
+      _selectedProfileId = profile.id;
+    });
+    await _connectIntoExistingSession(profile, fresh);
+  }
+
   Future<void> _closeTab(int idx) async {
     if (idx < 0 || idx >= _tabs.length) return;
     final group = _tabs[idx];
@@ -505,6 +1349,19 @@ class _ShellScreenState extends State<ShellScreen> {
       tab.error = e.toString();
       if (mounted) setState(() {});
     }
+  }
+
+  Future<void> _copyScreen() async {
+    final text = _activeTab?.snapshot?.text;
+    if (text == null || text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  Future<void> _pasteClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    await _writeBytes(utf8.encode(text.replaceAll('\n', '\r')));
   }
 
   /// Convert a Flutter key event to the byte sequence a Unix-like PTY expects.
@@ -579,10 +1436,54 @@ class _ShellScreenState extends State<ShellScreen> {
           logical == LogicalKeyboardKey.tab ||
           logical == LogicalKeyboardKey.comma ||
           (shift &&
-              (logical == LogicalKeyboardKey.keyH ||
-                  logical == LogicalKeyboardKey.keyV))) {
+              (logical == LogicalKeyboardKey.keyC ||
+                  logical == LogicalKeyboardKey.keyH ||
+                  logical == LogicalKeyboardKey.keyR ||
+                  logical == LogicalKeyboardKey.keyV ||
+                  logical == LogicalKeyboardKey.keyE))) {
         return null;
       }
+      // Flutter often reports null/empty `character` for Ctrl+letter on
+      // desktop, so map physical logical keys directly. This makes terminal
+      // essentials like Ctrl+C (ETX), Ctrl+D (EOT), Ctrl+Z (SUB) reliable.
+      final ctrlLetters = <LogicalKeyboardKey, int>{
+        LogicalKeyboardKey.keyA: 0x01,
+        LogicalKeyboardKey.keyB: 0x02,
+        LogicalKeyboardKey.keyC: 0x03,
+        LogicalKeyboardKey.keyD: 0x04,
+        LogicalKeyboardKey.keyE: 0x05,
+        LogicalKeyboardKey.keyF: 0x06,
+        LogicalKeyboardKey.keyG: 0x07,
+        LogicalKeyboardKey.keyH: 0x08,
+        LogicalKeyboardKey.keyI: 0x09,
+        LogicalKeyboardKey.keyJ: 0x0A,
+        LogicalKeyboardKey.keyK: 0x0B,
+        LogicalKeyboardKey.keyL: 0x0C,
+        LogicalKeyboardKey.keyM: 0x0D,
+        LogicalKeyboardKey.keyN: 0x0E,
+        LogicalKeyboardKey.keyO: 0x0F,
+        LogicalKeyboardKey.keyP: 0x10,
+        LogicalKeyboardKey.keyQ: 0x11,
+        LogicalKeyboardKey.keyR: 0x12,
+        LogicalKeyboardKey.keyS: 0x13,
+        LogicalKeyboardKey.keyT: 0x14,
+        LogicalKeyboardKey.keyU: 0x15,
+        LogicalKeyboardKey.keyV: 0x16,
+        LogicalKeyboardKey.keyW: 0x17,
+        LogicalKeyboardKey.keyX: 0x18,
+        LogicalKeyboardKey.keyY: 0x19,
+        LogicalKeyboardKey.keyZ: 0x1A,
+      };
+      final direct = ctrlLetters[logical];
+      if (direct != null) return [direct];
+
+      if (logical == LogicalKeyboardKey.space) return [0x00];
+      if (logical == LogicalKeyboardKey.bracketLeft) return [0x1B];
+      if (logical == LogicalKeyboardKey.backslash) return [0x1C];
+      if (logical == LogicalKeyboardKey.bracketRight) return [0x1D];
+      if (logical == LogicalKeyboardKey.digit6) return [0x1E];
+      if (logical == LogicalKeyboardKey.minus) return [0x1F];
+
       final ch = event.character;
       if (ch != null && ch.isNotEmpty) {
         final code = ch.toUpperCase().codeUnitAt(0);
@@ -638,6 +1539,7 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   Widget build(BuildContext context) {
     final tab = _activeTab;
+    final l10n = AppLocalizations.of(context);
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
         const SingleActivator(LogicalKeyboardKey.keyT, control: true):
@@ -652,8 +1554,14 @@ class _ShellScreenState extends State<ShellScreen> {
             const _SettingsIntent(),
         const SingleActivator(LogicalKeyboardKey.keyH,
             control: true, shift: true): const _SplitHorizontalIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyV,
+        const SingleActivator(LogicalKeyboardKey.keyE,
             control: true, shift: true): const _SplitVerticalIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyC,
+            control: true, shift: true): const _CopyScreenIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyV,
+            control: true, shift: true): const _PasteClipboardIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyR,
+            control: true, shift: true): const _ReconnectIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -703,36 +1611,50 @@ class _ShellScreenState extends State<ShellScreen> {
               return null;
             },
           ),
+          _CopyScreenIntent: CallbackAction<_CopyScreenIntent>(
+            onInvoke: (_) {
+              _copyScreen();
+              return null;
+            },
+          ),
+          _PasteClipboardIntent: CallbackAction<_PasteClipboardIntent>(
+            onInvoke: (_) {
+              _pasteClipboard();
+              return null;
+            },
+          ),
+          _ReconnectIntent: CallbackAction<_ReconnectIntent>(
+            onInvoke: (_) {
+              _reconnectActive();
+              return null;
+            },
+          ),
         },
         child: Focus(
           autofocus: true,
           child: Scaffold(
-            appBar: AppBar(
-              title: Text(
-                tab?.state == _ConnState.connected
-                    ? 'Tindra · ${tab!.profileName}'
-                    : 'Tindra',
-              ),
-              backgroundColor: appSettings.value.theme == 'light'
-                  ? const Color(0xFFFFFFFF)
-                  : const Color(0xFF161A22),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.settings),
-                  tooltip: 'Settings (Ctrl+,)',
-                  onPressed: _openSettingsDialog,
+            backgroundColor: Colors.transparent,
+            body: _PhosphorBackground(
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    _topBar(l10n, tab),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 4, 18, 14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(width: 308, child: _sidePanel()),
+                            const SizedBox(width: 16),
+                            Expanded(child: _terminalArea()),
+                          ],
+                        ),
+                      ),
+                    ),
+                    _statusBar(tab),
+                  ],
                 ),
-              ],
-            ),
-            body: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(width: 280, child: _sidePanel()),
-                  const SizedBox(width: 12),
-                  Expanded(child: _terminalArea()),
-                ],
               ),
             ),
           ),
@@ -770,125 +1692,485 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
+  Future<void> _openHostKeysDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => const _HostKeysDialog(),
+    );
+  }
+
+  // ---------------------- Top bar & status bar ----------------------
+
+  Widget _topBar(AppLocalizations l10n, _SessionTab? tab) {
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: _divider, width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          const _TindraMark(size: 32),
+          const SizedBox(width: 14),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'TINDRA',
+                style: TextStyle(
+                  fontFamily: 'Cascadia Mono',
+                  fontFamilyFallback: _displayMono,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 7,
+                  color: _textHi,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Row(
+                children: [
+                  Container(width: 14, height: 1, color: _accent),
+                  const SizedBox(width: 6),
+                  Text(
+                    'PHOSPHOR · v0.1',
+                    style: TextStyle(
+                      fontFamily: 'Cascadia Mono',
+                      fontFamilyFallback: _displayMono,
+                      fontSize: 9.5,
+                      letterSpacing: 2.4,
+                      color: _textLow,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(width: 28),
+          if (tab != null) _sessionBreadcrumb(tab),
+          const Spacer(),
+          _topAction(
+            icon: Icons.copy_outlined,
+            tooltip: l10n.copyScreenTooltip,
+            onTap: _activeTab?.snapshot == null ? null : _copyScreen,
+          ),
+          _topAction(
+            icon: Icons.content_paste_outlined,
+            tooltip: l10n.pasteClipboardTooltip,
+            onTap: _activeTab?.state == _ConnState.connected
+                ? _pasteClipboard
+                : null,
+          ),
+          _topAction(
+            icon: Icons.replay_outlined,
+            tooltip: l10n.reconnectTooltip,
+            onTap: _activeTab == null ? null : _reconnectActive,
+          ),
+          const SizedBox(width: 8),
+          Container(width: 1, height: 22, color: _divider),
+          const SizedBox(width: 8),
+          _topAction(
+            icon: Icons.verified_outlined,
+            tooltip: l10n.trustedHostKeys,
+            onTap: _openHostKeysDialog,
+          ),
+          _topAction(
+            icon: Icons.tune,
+            tooltip: l10n.settingsTooltip,
+            onTap: _openSettingsDialog,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sessionBreadcrumb(_SessionTab tab) {
+    final stateColor = switch (tab.state) {
+      _ConnState.connecting => _amber,
+      _ConnState.connected => _accent,
+      _ConnState.disconnected => _coral,
+    };
+    final label = switch (tab.state) {
+      _ConnState.connecting => 'CONNECTING',
+      _ConnState.connected => 'LIVE',
+      _ConnState.disconnected => 'OFFLINE',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: _bgSurfaceLo,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: _divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _StatusLED(
+            color: stateColor,
+            pulsing: tab.state == _ConnState.connecting,
+            size: 6,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontFamily: 'Cascadia Mono',
+              fontFamilyFallback: _displayMono,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.6,
+              color: stateColor,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(width: 1, height: 12, color: _divider),
+          const SizedBox(width: 10),
+          Text(
+            tab.profileName,
+            style: TextStyle(
+              fontFamily: 'Cascadia Mono',
+              fontFamilyFallback: _displayMono,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _textHi,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _topAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+  }) {
+    final enabled = onTap != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.transparent),
+            ),
+            child: Icon(
+              icon,
+              size: 17,
+              color: enabled
+                  ? _textMid
+                  : _textLow.withValues(alpha: 0.45),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statusBar(_SessionTab? tab) {
+    final s = tab?.snapshot;
+    final transport = (() {
+      if (tab == null) return '—';
+      if (tab.profileId == _localShellProfileId) return 'LOCAL';
+      final p = _profileById(tab.profileId);
+      return (p?.transport ?? 'ssh').toUpperCase();
+    })();
+    final stateLabel = switch (tab?.state) {
+      null => 'IDLE',
+      _ConnState.connecting => 'HANDSHAKE',
+      _ConnState.connected => 'READY',
+      _ConnState.disconnected => 'CLOSED',
+    };
+    final grid = s != null ? '${s.cols}×${s.rows}' : '—';
+    final cursor = s != null ? '${s.cursorRow},${s.cursorCol}' : '—';
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      decoration: BoxDecoration(
+        color: _bgSurfaceLo,
+        border: Border(top: BorderSide(color: _divider)),
+      ),
+      child: Row(
+        children: [
+          _statusChip('TRX', transport),
+          _statusChip('STATE', stateLabel),
+          _statusChip('GRID', grid),
+          _statusChip('CUR', cursor),
+          const Spacer(),
+          _statusChip('SESSIONS', '${_tabs.length}'),
+          _statusChip('FONT',
+              '${appSettings.value.fontFamily} · ${appSettings.value.fontSize.toStringAsFixed(0)}'),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusChip(String key, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 22),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            key,
+            style: TextStyle(
+              fontFamily: 'Cascadia Mono',
+              fontFamilyFallback: _displayMono,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.6,
+              color: _accentDim,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontFamily: 'Cascadia Mono',
+              fontFamilyFallback: _displayMono,
+              fontSize: 11,
+              color: _textMid,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ---------------------- Sidebar ----------------------
 
   Widget _sidePanel() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: Text('Profiles',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF8AA0B5))),
-          ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.add, size: 20),
-            tooltip: 'New profile',
-            onPressed: () => _openProfileDialog(),
-          ),
-        ]),
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF161A22),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: const Color(0xFF1F2937)),
+    final l10n = AppLocalizations.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _bgSurface.withValues(alpha: _isLight ? 0.92 : 0.78),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SectionLabel(
+            l10n.profiles,
+            trailing: _miniIconButton(
+              icon: Icons.add,
+              tooltip: l10n.newProfile,
+              onTap: () => _openProfileDialog(),
             ),
-            child: _profilesLoading
-                ? const Center(
-                    child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                  )
-                : _profiles.isEmpty
-                    ? _emptyState()
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        itemCount: _profiles.length,
-                        itemBuilder: (_, i) => _profileTile(_profiles[i]),
+          ),
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: _bgSurfaceLo,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: _divider),
+              ),
+              child: _profilesLoading
+                  ? Center(
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.6,
+                          color: _accent,
+                        ),
                       ),
-          ),
-        ),
-        if (_selectedProfile != null) ...[
-          const SizedBox(height: 10),
-          _connectionActions(_selectedProfile!),
-        ],
-        if (_activeTab?.snapshot != null &&
-            _activeTab!.state == _ConnState.connected) ...[
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              'grid: ${_activeTab!.snapshot!.cols}×${_activeTab!.snapshot!.rows}    '
-              'cursor: (${_activeTab!.snapshot!.cursorRow},${_activeTab!.snapshot!.cursorCol})',
-              style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF8AA0B5),
-                  fontFamily: 'Consolas'),
+                    )
+                  : _profiles.isEmpty
+                      ? _emptyState()
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          itemCount: _profiles.length,
+                          itemBuilder: (_, i) => _profileTile(_profiles[i]),
+                        ),
             ),
           ),
+          const SizedBox(height: 12),
+          _ghostButton(
+            icon: Icons.terminal,
+            label: l10n.openLocalShell,
+            onTap: _openLocalShell,
+          ),
+          if (_selectedProfile != null) ...[
+            const SizedBox(height: 14),
+            _SectionLabel('CONSOLE'),
+            _connectionActions(_selectedProfile!),
+          ],
+          if (_sidebarError != null) ...[
+            const SizedBox(height: 12),
+            _errorBox(
+              _sidebarError!,
+              onClose: () => setState(() => _sidebarError = null),
+            ),
+          ],
+          if (_activeTab?.error != null) ...[
+            const SizedBox(height: 12),
+            _errorBox(
+              _activeTab!.error!,
+              onClose: () => setState(() => _activeTab!.error = null),
+            ),
+          ],
         ],
-        if (_sidebarError != null) ...[
-          const SizedBox(height: 10),
-          _errorBox(_sidebarError!,
-              onClose: () => setState(() => _sidebarError = null)),
-        ],
-        if (_activeTab?.error != null) ...[
-          const SizedBox(height: 10),
-          _errorBox(_activeTab!.error!,
-              onClose: () => setState(() => _activeTab!.error = null)),
-        ],
-      ],
+      ),
+    );
+  }
+
+  Widget _miniIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(3),
+        child: Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            border: Border.all(color: _dividerHi),
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: Icon(icon, size: 14, color: _textMid),
+        ),
+      ),
+    );
+  }
+
+  Widget _ghostButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    Color? accentTint,
+  }) {
+    final tint = accentTint ?? _textMid;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: _bgSurfaceLo,
+          border: Border.all(color: _dividerHi),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 14, color: tint),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: TextStyle(
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4,
+                color: _textHi,
+              ),
+            ),
+            const Spacer(),
+            Icon(Icons.chevron_right, size: 14, color: _textLow),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _errorBox(String msg, {required VoidCallback onClose}) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF2A1417),
-        border: Border.all(color: const Color(0xFFFF6E6E)),
-        borderRadius: BorderRadius.circular(6),
+        color: _isLight
+            ? const Color(0xFFFCEDE9)
+            : const Color(0xFF1F100F),
+        border: Border.all(color: _coral.withValues(alpha: 0.7)),
+        borderRadius: BorderRadius.circular(4),
       ),
-      padding: const EdgeInsets.all(10),
-      child: Row(children: [
-        Expanded(
-          child: Text(msg,
-              style: const TextStyle(
-                  color: Color(0xFFFFB4B4),
-                  fontFamily: 'Consolas',
-                  fontSize: 12)),
-        ),
-        IconButton(
-          icon: const Icon(Icons.close, size: 16),
-          onPressed: onClose,
-        ),
-      ]),
+      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1, right: 8),
+            child: Icon(Icons.error_outline, size: 14, color: _coral),
+          ),
+          Expanded(
+            child: Text(
+              msg,
+              style: TextStyle(
+                color: _isLight ? _Pal.paperCoral : const Color(0xFFFFB6AC),
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 11.5,
+                height: 1.45,
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: onClose,
+            borderRadius: BorderRadius.circular(3),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(Icons.close, size: 14, color: _coral),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _emptyState() {
+    final l10n = AppLocalizations.of(context);
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(22),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.dns_outlined,
-                size: 36, color: Color(0xFF8AA0B5)),
-            const SizedBox(height: 8),
-            const Text('No profiles yet',
-                style: TextStyle(color: Color(0xFF8AA0B5))),
-            const SizedBox(height: 8),
-            FilledButton.tonalIcon(
+            Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                border: Border.all(color: _dividerHi),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Center(
+                child: Icon(Icons.lan_outlined, size: 24, color: _textMid),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '— NO HOSTS REGISTERED —',
+              style: TextStyle(
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 9.5,
+                letterSpacing: 1.6,
+                color: _textLow,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              l10n.noProfilesYet,
+              style: TextStyle(color: _textMid, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
               onPressed: () => _openProfileDialog(),
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Create one'),
+              icon: const Icon(Icons.add, size: 14),
+              label: Text(l10n.createOne.toUpperCase()),
             ),
           ],
         ),
@@ -898,64 +2180,207 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Widget _profileTile(rust.Profile p) {
     final selected = p.id == _selectedProfileId;
-    return InkWell(
-      onTap: () => setState(() => _selectedProfileId = p.id),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF1B2030) : null,
-          border: Border(
-            left: BorderSide(
-              color:
-                  selected ? const Color(0xFF7AC0FF) : Colors.transparent,
-              width: 3,
+    final monogram = _monogramFor(p);
+    final transport = (p.transport.isEmpty ? 'ssh' : p.transport).toUpperCase();
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => setState(() => _selectedProfileId = p.id),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 9, 12, 9),
+          decoration: BoxDecoration(
+            color: selected
+                ? (_isLight
+                    ? _accent.withValues(alpha: 0.10)
+                    : _accent.withValues(alpha: 0.06))
+                : null,
+            border: Border(
+              left: BorderSide(
+                color: selected ? _accent : Colors.transparent,
+                width: 3,
+              ),
+              bottom: BorderSide(
+                color: _divider.withValues(alpha: 0.6),
+                width: 0.5,
+              ),
             ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              p.name.isEmpty ? '(unnamed)' : p.name,
-              style:
-                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '${p.username}@${p.host}${p.port == 22 ? "" : ":${p.port}"}',
-              style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF8AA0B5),
-                  fontFamily: 'Consolas'),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: _bgSurfaceHi,
+                  border: Border.all(color: _dividerHi),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Center(
+                  child: Text(
+                    monogram,
+                    style: TextStyle(
+                      fontFamily: 'Cascadia Mono',
+                      fontFamilyFallback: _displayMono,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                      color: selected ? _accent : _textMid,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            p.name.isEmpty ? '(unnamed)' : p.name,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: _textHi,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: _dividerHi,
+                            ),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: Text(
+                            transport,
+                            style: TextStyle(
+                              fontFamily: 'Cascadia Mono',
+                              fontFamilyFallback: _displayMono,
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.0,
+                              color: _textLow,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${p.username}@${p.host}${p.port == 22 ? "" : ":${p.port}"}',
+                      style: TextStyle(
+                        fontFamily: 'Cascadia Mono',
+                        fontFamilyFallback: _displayMono,
+                        fontSize: 10.5,
+                        color: _textMid,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  String _monogramFor(rust.Profile p) {
+    final source = p.name.trim().isNotEmpty
+        ? p.name.trim()
+        : (p.host.trim().isNotEmpty ? p.host.trim() : '?');
+    final parts = source
+        .replaceAll(RegExp(r'[^A-Za-z0-9 .\-_]'), '')
+        .split(RegExp(r'[\s.\-_]+'))
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    final s = parts.isEmpty ? source : parts[0];
+    return s.length >= 2
+        ? s.substring(0, 2).toUpperCase()
+        : s.toUpperCase().padRight(1);
+  }
+
   Widget _connectionActions(rust.Profile p) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          controller: _passphrase,
-          obscureText: true,
-          decoration: const InputDecoration(
-            hintText: 'Key passphrase (if any)',
-            hintStyle: TextStyle(fontSize: 12),
+        Container(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+          decoration: BoxDecoration(
+            color: _bgSurfaceLo,
+            border: Border.all(color: _divider),
+            borderRadius: BorderRadius.circular(4),
           ),
-          style: const TextStyle(fontFamily: 'Consolas', fontSize: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                p.name.isEmpty ? p.host : p.name,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: _textHi,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${p.username}@${p.host}${p.port == 22 ? "" : ":${p.port}"}',
+                style: TextStyle(
+                  fontFamily: 'Cascadia Mono',
+                  fontFamilyFallback: _displayMono,
+                  fontSize: 11,
+                  color: _accent,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              if (p.transport == 'ssh' && p.authMethod == 'key') ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _passphrase,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                    hintText: l10n.keyPassphraseHint,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 9),
+                    prefixIcon: Padding(
+                      padding: const EdgeInsets.only(left: 8, right: 4),
+                      child:
+                          Icon(Icons.key_outlined, size: 14, color: _textLow),
+                    ),
+                    prefixIconConstraints:
+                        const BoxConstraints(minWidth: 26, minHeight: 26),
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Cascadia Mono',
+                    fontFamilyFallback: _displayMono,
+                    fontSize: 11.5,
+                    color: _textHi,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         FilledButton.icon(
           onPressed: _connectSelected,
-          icon: const Icon(Icons.add_link),
-          label: Text('Open ${p.name}'),
+          icon: const Icon(Icons.bolt, size: 16),
+          label: Text('OPEN ${p.name.toUpperCase()}'),
           style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            minimumSize: const Size.fromHeight(0),
           ),
         ),
         const SizedBox(height: 6),
@@ -963,28 +2388,36 @@ class _ShellScreenState extends State<ShellScreen> {
           Expanded(
             child: OutlinedButton.icon(
               onPressed: () => _openProfileDialog(existing: p),
-              icon: const Icon(Icons.edit, size: 16),
-              label: const Text('Edit'),
+              icon: const Icon(Icons.edit_outlined, size: 14),
+              label: Text(l10n.edit.toUpperCase()),
             ),
           ),
           const SizedBox(width: 6),
-          IconButton.outlined(
-            tooltip: 'Delete',
-            icon: const Icon(Icons.delete_outline, size: 18),
-            onPressed: () => _deleteProfile(p),
+          SizedBox(
+            width: 44,
+            height: 40,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.zero,
+                foregroundColor: _coral,
+                side: BorderSide(color: _coral.withValues(alpha: 0.45)),
+              ),
+              onPressed: () => _deleteProfile(p),
+              child: const Icon(Icons.delete_outline, size: 16),
+            ),
           ),
         ]),
         const SizedBox(height: 6),
-        OutlinedButton.icon(
-          onPressed: () => _openSftpDialog(p),
-          icon: const Icon(Icons.folder_shared, size: 16),
-          label: const Text('SFTP browser'),
+        _ghostButton(
+          icon: Icons.folder_shared_outlined,
+          label: l10n.sftpBrowser.toUpperCase(),
+          onTap: () => _openSftpDialog(p),
         ),
         const SizedBox(height: 6),
-        OutlinedButton.icon(
-          onPressed: () => _openForwardDialog(p),
-          icon: const Icon(Icons.cable, size: 16),
-          label: const Text('Port forwards'),
+        _ghostButton(
+          icon: Icons.cable_outlined,
+          label: l10n.portForwards.toUpperCase(),
+          onTap: () => _openForwardDialog(p),
         ),
       ],
     );
@@ -993,53 +2426,117 @@ class _ShellScreenState extends State<ShellScreen> {
   // ---------------------- Terminal area (tab bar + active terminal) ----------------------
 
   Widget _terminalArea() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _tabBar(),
-        const SizedBox(height: 8),
-        Expanded(child: _terminalPanel()),
-      ],
+    return Container(
+      decoration: BoxDecoration(
+        color: _bgSurface.withValues(alpha: _isLight ? 0.92 : 0.78),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _tabBar(),
+          Expanded(child: _terminalPanel()),
+        ],
+      ),
     );
   }
 
   Widget _tabBar() {
+    final l10n = AppLocalizations.of(context);
     if (_tabs.isEmpty) {
-      return SizedBox(
-        height: 36,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'no open sessions',
+      return Container(
+        height: 38,
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: _divider),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Row(
+          children: [
+            Container(width: 3, height: 14, color: _accentDim),
+            const SizedBox(width: 8),
+            Text(
+              l10n.noOpenSessions.toUpperCase(),
               style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-                fontStyle: FontStyle.italic,
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.6,
+                color: _textLow,
               ),
             ),
-          ),
+            const Spacer(),
+            Tooltip(
+              message: _selectedProfile == null
+                  ? l10n.pickProfileToOpen
+                  : l10n.openSelectedProfile(_selectedProfile!.name),
+              child: InkWell(
+                onTap:
+                    _selectedProfile == null ? null : _connectSelected,
+                borderRadius: BorderRadius.circular(3),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: _dividerHi),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add, size: 12, color: _textMid),
+                      const SizedBox(width: 4),
+                      Text(
+                        'NEW',
+                        style: TextStyle(
+                          fontFamily: 'Cascadia Mono',
+                          fontFamilyFallback: _displayMono,
+                          fontSize: 10,
+                          letterSpacing: 1.4,
+                          fontWeight: FontWeight.w700,
+                          color: _textMid,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
-    return SizedBox(
-      height: 36,
+    return Container(
+      height: 38,
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: _divider)),
+      ),
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: _tabs.length + 1,
         itemBuilder: (_, i) {
           if (i == _tabs.length) {
-            // trailing "+" — opens connect-with-current-selection
             return Padding(
-              padding: const EdgeInsets.only(left: 4),
-              child: IconButton(
-                icon: const Icon(Icons.add, size: 18),
-                tooltip: _selectedProfile == null
-                    ? 'Pick a profile to open'
-                    : 'Open ${_selectedProfile!.name}',
-                onPressed:
-                    _selectedProfile == null ? null : _connectSelected,
+              padding: const EdgeInsets.fromLTRB(6, 6, 8, 6),
+              child: Tooltip(
+                message: _selectedProfile == null
+                    ? l10n.pickProfileToOpen
+                    : l10n.openSelectedProfile(_selectedProfile!.name),
+                child: InkWell(
+                  onTap: _selectedProfile == null ? null : _connectSelected,
+                  borderRadius: BorderRadius.circular(3),
+                  child: Container(
+                    width: 32,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _dividerHi),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Icon(Icons.add, size: 14, color: _textMid),
+                  ),
+                ),
               ),
             );
           }
@@ -1053,65 +2550,80 @@ class _ShellScreenState extends State<ShellScreen> {
     final group = _tabs[i];
     final active = i == _activeIdx;
     final stateColor = switch (group.active.state) {
-      _ConnState.connecting => const Color(0xFFFFB86C),
-      _ConnState.connected => const Color(0xFF4ADE80),
-      _ConnState.disconnected => const Color(0xFFFF6E6E),
+      _ConnState.connecting => _amber,
+      _ConnState.connected => _accent,
+      _ConnState.disconnected => _coral,
     };
     return Padding(
-      padding: const EdgeInsets.only(right: 4),
-      child: Material(
-        color: active ? const Color(0xFF1B2030) : const Color(0xFF13161E),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(6),
-          side: BorderSide(
-            color: active
-                ? const Color(0xFF7AC0FF)
-                : const Color(0xFF1F2937),
-            width: 1,
-          ),
-        ),
-        child: InkWell(
-          onTap: () => _switchTab(i),
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: stateColor,
-                    shape: BoxShape.circle,
+      padding: const EdgeInsets.only(right: 1),
+      child: SizedBox(
+        height: 38,
+        child: Stack(
+          children: [
+            Material(
+              color: active ? _bgSurfaceHi : Colors.transparent,
+              child: InkWell(
+                onTap: () => _switchTab(i),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _StatusLED(
+                        color: stateColor,
+                        pulsing: group.active.state == _ConnState.connecting,
+                        size: 6,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        group.sessions.length > 1
+                            ? '${group.profileName} ·${group.sessions.length}'
+                            : group.profileName,
+                        style: TextStyle(
+                          fontFamily: 'Cascadia Mono',
+                          fontFamilyFallback: _displayMono,
+                          fontSize: 11.5,
+                          letterSpacing: 0.4,
+                          fontWeight:
+                              active ? FontWeight.w700 : FontWeight.w500,
+                          color: active ? _textHi : _textMid,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        key: ValueKey('tab-close-$i'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _closeTab(i),
+                        child: Padding(
+                          padding: const EdgeInsets.all(3),
+                          child: Icon(
+                            Icons.close,
+                            size: 12,
+                            color: active ? _textMid : _textLow,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  group.sessions.length > 1
-                      ? '${group.profileName} (${group.sessions.length})'
-                      : group.profileName,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: active
-                        ? const Color(0xFFE3E9F1)
-                        : const Color(0xFF8AA0B5),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  key: ValueKey('tab-close-$i'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _closeTab(i),
-                  child: const Padding(
-                    padding: EdgeInsets.all(2),
-                    child:
-                        Icon(Icons.close, size: 14, color: Color(0xFF8AA0B5)),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+            if (active)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(height: 2, color: _accent),
+              ),
+            // subtle right divider between tabs
+            Positioned(
+              right: 0,
+              top: 8,
+              bottom: 8,
+              child: Container(width: 1, color: _divider),
+            ),
+          ],
         ),
       ),
     );
@@ -1150,15 +2662,13 @@ class _ShellScreenState extends State<ShellScreen> {
           child: Container(
             decoration: BoxDecoration(
               border: Border.all(
-                color: isActive
-                    ? const Color(0xFF7AC0FF)
-                    : const Color(0xFF1F2937),
-                width: isActive ? 1.5 : 1,
+                color: isActive ? _accent : _divider,
+                width: isActive ? 1.4 : 1,
               ),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(2),
             ),
             margin: const EdgeInsets.all(2),
-            padding: const EdgeInsets.all(4),
+            padding: const EdgeInsets.all(6),
             child: _CellGrid(
               tab: group.sessions[i],
               isFocused: isActive && _termFocus.hasFocus,
@@ -1176,52 +2686,73 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Widget _terminalPanel() {
-    return Container(
-      decoration: BoxDecoration(
-        color: _termBg,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFF1F2937)),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: Focus(
-          focusNode: _termFocus,
-          autofocus: false,
-          onKeyEvent: _onTermKey,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _termFocus.requestFocus(),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final probe = TextPainter(
-                  text: TextSpan(text: 'M', style: _termStyle),
-                  textDirection: TextDirection.ltr,
-                )..layout();
-                final charWidth = probe.width;
-                final lineHeight = probe.height;
-                probe.dispose();
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Stack(
+        children: [
+          // Inner viewport with the terminal background colour and a thin
+          // phosphor-tinted hairline.
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                color: _termBg,
+                border: Border.all(color: _dividerHi),
+                borderRadius: BorderRadius.circular(2),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: Focus(
+                  focusNode: _termFocus,
+                  autofocus: false,
+                  onKeyEvent: _onTermKey,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _termFocus.requestFocus(),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final probe = TextPainter(
+                          text: TextSpan(text: 'M', style: _termStyle),
+                          textDirection: TextDirection.ltr,
+                        )..layout();
+                        final charWidth = probe.width;
+                        final lineHeight = probe.height;
+                        probe.dispose();
 
-                const padding = 12.0;
-                final availW = constraints.maxWidth - padding * 2;
-                final availH = constraints.maxHeight - padding * 2;
-                final fitCols = (availW / charWidth).floor().clamp(20, 400);
-                final fitRows = (availH / lineHeight).floor().clamp(8, 200);
+                        const padding = 14.0;
+                        final availW = constraints.maxWidth - padding * 2;
+                        final availH = constraints.maxHeight - padding * 2;
+                        final fitCols =
+                            (availW / charWidth).floor().clamp(20, 400);
+                        final fitRows =
+                            (availH / lineHeight).floor().clamp(8, 200);
 
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _scheduleResize(fitCols, fitRows);
-                });
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _scheduleResize(fitCols, fitRows);
+                        });
 
-                return Padding(
-                  padding: const EdgeInsets.all(padding),
-                  child: _splitView(
-                    charWidth: charWidth,
-                    lineHeight: lineHeight,
+                        return Padding(
+                          padding: const EdgeInsets.all(padding),
+                          child: _splitView(
+                            charWidth: charWidth,
+                            lineHeight: lineHeight,
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                );
-              },
+                ),
+              ),
             ),
           ),
-        ),
+          // Subtle scanline overlay (dark theme only)
+          const Positioned.fill(child: _ScanlineOverlay()),
+          // Viewfinder corner brackets
+          Positioned.fill(
+            child: _CornerBrackets(
+              color: _accent.withValues(alpha: _isLight ? 0.55 : 0.35),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1246,9 +2777,25 @@ class _CellGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     if (tab == null) {
       return Center(
-        child: Text(
-          'Pick a profile on the left, then "Open" to start a session.',
-          style: TextStyle(color: Colors.grey.shade500),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '◇ NO ACTIVE SESSION ◇',
+              style: TextStyle(
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 10,
+                letterSpacing: 2,
+                color: _textLow,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              AppLocalizations.of(context).pickProfilePrompt,
+              style: TextStyle(color: _textMid, fontSize: 12),
+            ),
+          ],
         ),
       );
     }
@@ -1258,14 +2805,30 @@ class _CellGrid extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.6,
+                color: _amber,
+              ),
             ),
-            const SizedBox(height: 12),
-            Text('Connecting to ${t.profileName}…',
-                style: TextStyle(color: Colors.grey.shade400)),
+            const SizedBox(height: 14),
+            Text(
+              '— HANDSHAKE —',
+              style: TextStyle(
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 10,
+                letterSpacing: 2,
+                color: _amber,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              AppLocalizations.of(context).connectingTo(t.profileName),
+              style: TextStyle(color: _textMid, fontSize: 12),
+            ),
           ],
         ),
       );
@@ -1275,10 +2838,23 @@ class _CellGrid extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.link_off, size: 32, color: Colors.grey.shade600),
-            const SizedBox(height: 8),
-            Text('Disconnected',
-                style: TextStyle(color: Colors.grey.shade400)),
+            Icon(Icons.link_off, size: 28, color: _coral),
+            const SizedBox(height: 10),
+            Text(
+              '— LINK DOWN —',
+              style: TextStyle(
+                fontFamily: 'Cascadia Mono',
+                fontFamilyFallback: _displayMono,
+                fontSize: 10,
+                letterSpacing: 2,
+                color: _coral,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              AppLocalizations.of(context).disconnected,
+              style: TextStyle(color: _textMid, fontSize: 12),
+            ),
           ],
         ),
       );
@@ -1286,8 +2862,10 @@ class _CellGrid extends StatelessWidget {
     final s = t.snapshot;
     if (s == null) {
       return Center(
-        child: Text('waiting for first chunk…',
-            style: TextStyle(color: Colors.grey.shade500)),
+        child: Text(
+          AppLocalizations.of(context).waitingForFirstChunk,
+          style: TextStyle(color: _textMid, fontSize: 12),
+        ),
       );
     }
     final spans = _buildSpans(s);
@@ -1311,12 +2889,12 @@ class _CellGrid extends StatelessWidget {
               child: Container(
                 decoration: BoxDecoration(
                   color: isFocused
-                      ? const Color(0xFF7AC0FF).withValues(alpha: 0.55)
-                      : const Color(0xFF7AC0FF).withValues(alpha: 0.20),
+                      ? _accent.withValues(alpha: 0.55)
+                      : _accent.withValues(alpha: 0.18),
                   border: isFocused
                       ? null
                       : Border.all(
-                          color: const Color(0xFF7AC0FF).withValues(alpha: 0.6),
+                          color: _accent.withValues(alpha: 0.65),
                           width: 1,
                         ),
                 ),
@@ -1325,16 +2903,34 @@ class _CellGrid extends StatelessWidget {
           ),
         if (t.state == _ConnState.disconnected)
           Positioned(
-            top: 8,
-            right: 8,
-            child: Material(
-              color: const Color(0xFF8B2C2C).withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(4),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Text(
-                  'disconnected',
-                  style: TextStyle(fontSize: 11, color: Colors.white),
+            top: 6,
+            right: 6,
+            child: IgnorePointer(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _coral.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.bolt_outlined,
+                        size: 11, color: _isLight ? Colors.white : _Pal.ink),
+                    const SizedBox(width: 4),
+                    Text(
+                      'OFFLINE',
+                      style: TextStyle(
+                        fontFamily: 'Cascadia Mono',
+                        fontFamilyFallback: _displayMono,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.6,
+                        color: _isLight ? Colors.white : _Pal.ink,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1399,6 +2995,7 @@ TextStyle _styleForCell(rust.Cell c) {
     decoration: (c.attrs & 4) != 0 ? TextDecoration.underline : null,
     inherit: true,
     fontFamily: appSettings.value.fontFamily,
+    fontFamilyFallback: _terminalFontFallback,
     fontSize: appSettings.value.fontSize,
     height: 1.35,
   );
@@ -1494,9 +3091,10 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   @override
   Widget build(BuildContext context) {
     final isNew = widget.initial == null;
+    final l10n = AppLocalizations.of(context);
     return AlertDialog(
       backgroundColor: const Color(0xFF161A22),
-      title: Text(isNew ? 'New profile' : 'Edit profile'),
+      title: Text(isNew ? l10n.newProfile : l10n.editProfile),
       content: SizedBox(
         width: 440,
         child: SingleChildScrollView(
@@ -1504,20 +3102,20 @@ class _ProfileDialogState extends State<_ProfileDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              _row('Name', _name, hint: 'e.g. prod-web-1'),
-              _row('Host', _host, hint: 'localhost / 1.2.3.4 / dev.example.com'),
+              _row(l10n.name, _name, hint: 'e.g. prod-web-1'),
+              _row(l10n.host, _host, hint: 'localhost / 1.2.3.4 / dev.example.com'),
               Row(children: [
-                Expanded(child: _row('User', _user, hint: 'XIU')),
+                Expanded(child: _row(l10n.user, _user, hint: 'XIU')),
                 const SizedBox(width: 8),
-                SizedBox(width: 100, child: _row('Port', _port)),
+                SizedBox(width: 100, child: _row(l10n.port, _port)),
               ]),
               _transportPicker(),
               if (_transport == 'ssh') ...[
                 _authMethodPicker(),
-                if (_authMethod == 'key') _row('Private key path', _key),
+                if (_authMethod == 'key') _row(l10n.privateKeyPath, _key),
               ],
               _jumpSection(),
-              _row('Notes', _notes, hint: 'optional', maxLines: 2),
+              _row(l10n.notes, _notes, hint: l10n.optional, maxLines: 2),
             ],
           ),
         ),
@@ -1525,34 +3123,35 @@ class _ProfileDialogState extends State<_ProfileDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(l10n.cancel),
         ),
         FilledButton(
           onPressed: _host.text.trim().isEmpty || _user.text.trim().isEmpty
               ? null
               : _save,
-          child: Text(isNew ? 'Create' : 'Save'),
+          child: Text(isNew ? l10n.create : l10n.save),
         ),
       ],
     );
   }
 
   Widget _transportPicker() {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 4),
-            child: Text('Transport',
-                style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 4),
+            child: Text(l10n.transport,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
           ),
           DropdownButtonFormField<String>(
             initialValue: _transport,
-            items: const [
-              DropdownMenuItem(value: 'ssh', child: Text('SSH')),
-              DropdownMenuItem(value: 'telnet', child: Text('Telnet (raw TCP)')),
+            items: [
+              DropdownMenuItem(value: 'ssh', child: Text(l10n.ssh)),
+              DropdownMenuItem(value: 'telnet', child: Text(l10n.telnetRawTcp)),
             ],
             onChanged: (v) => setState(() => _transport = v ?? 'ssh'),
           ),
@@ -1562,16 +3161,17 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   }
 
   Widget _jumpSection() {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            const Padding(
-              padding: EdgeInsets.only(left: 4),
-              child: Text('Jump host',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text(l10n.jumpHost,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
             ),
             const Spacer(),
             Switch(
@@ -1581,14 +3181,14 @@ class _ProfileDialogState extends State<_ProfileDialog> {
           ]),
           if (_showJump) ...[
             Row(children: [
-              Expanded(child: _row('Host', _jumpHost, hint: 'jump.example.com')),
+              Expanded(child: _row(l10n.host, _jumpHost, hint: 'jump.example.com')),
               const SizedBox(width: 8),
-              SizedBox(width: 100, child: _row('Port', _jumpPort)),
+              SizedBox(width: 100, child: _row(l10n.port, _jumpPort)),
             ]),
             Row(children: [
-              Expanded(child: _row('User', _jumpUser, hint: 'XIU')),
+              Expanded(child: _row(l10n.user, _jumpUser, hint: 'XIU')),
               const SizedBox(width: 8),
-              Expanded(child: _row('Key path', _jumpKey)),
+              Expanded(child: _row(l10n.keyPath, _jumpKey)),
             ]),
           ],
         ],
@@ -1597,38 +3197,35 @@ class _ProfileDialogState extends State<_ProfileDialog> {
   }
 
   Widget _authMethodPicker() {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 4),
-            child: Text('Auth',
-                style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 4),
+            child: Text(l10n.auth,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
           ),
-          Row(children: [
-            Expanded(
-              child: RadioListTile<String>(
-                title: const Text('Private key', style: TextStyle(fontSize: 13)),
-                value: 'key',
-                groupValue: _authMethod,
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                onChanged: (v) => setState(() => _authMethod = v ?? 'key'),
-              ),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<String>(
+              segments: [
+                ButtonSegment<String>(
+                  value: 'key',
+                  label: Text(l10n.privateKey),
+                ),
+                ButtonSegment<String>(
+                  value: 'agent',
+                  label: Text(l10n.sshAgent),
+                ),
+              ],
+              selected: {_authMethod},
+              onSelectionChanged: (v) =>
+                  setState(() => _authMethod = v.firstOrNull ?? 'key'),
             ),
-            Expanded(
-              child: RadioListTile<String>(
-                title: const Text('SSH agent', style: TextStyle(fontSize: 13)),
-                value: 'agent',
-                groupValue: _authMethod,
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                onChanged: (v) => setState(() => _authMethod = v ?? 'key'),
-              ),
-            ),
-          ]),
+          ),
         ],
       ),
     );
@@ -2305,6 +3902,164 @@ class _SplitVerticalIntent extends Intent {
   const _SplitVerticalIntent();
 }
 
+class _CopyScreenIntent extends Intent {
+  const _CopyScreenIntent();
+}
+
+class _PasteClipboardIntent extends Intent {
+  const _PasteClipboardIntent();
+}
+
+class _ReconnectIntent extends Intent {
+  const _ReconnectIntent();
+}
+
+
+class _HostKeysDialog extends StatefulWidget {
+  const _HostKeysDialog();
+
+  @override
+  State<_HostKeysDialog> createState() => _HostKeysDialogState();
+}
+
+class _HostKeysDialogState extends State<_HostKeysDialog> {
+  late Future<List<rust.HostKey>> _future;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = rust.listHostKeys();
+  }
+
+  void _reload() {
+    setState(() {
+      _error = null;
+      _future = rust.listHostKeys();
+    });
+  }
+
+  String _fmt(BuildContext context, BigInt ms) {
+    final value = ms.toInt();
+    if (value <= 0) return AppLocalizations.of(context).unknown;
+    return DateTime.fromMillisecondsSinceEpoch(value).toLocal().toString();
+  }
+
+  Future<void> _delete(rust.HostKey key) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final l10n = AppLocalizations.of(ctx);
+        return AlertDialog(
+          title: Text(l10n.removeTrustedHostKeyQuestion),
+          content: Text(l10n.removeTrustedHostKeyContent(key.host, key.port)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8B2C2C),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(l10n.remove),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok != true) return;
+    try {
+      await rust.deleteHostKey(host: key.host, port: key.port);
+      _reload();
+    } catch (e) {
+      setState(() => _error = e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(l10n.trustedHostKeys),
+      content: SizedBox(
+        width: 680,
+        height: 420,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              l10n.trustedHostKeysDescription,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5)),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: Color(0xFFFFB4B4))),
+            ],
+            const SizedBox(height: 12),
+            Expanded(
+              child: FutureBuilder<List<rust.HostKey>>(
+                future: _future,
+                builder: (context, snap) {
+                  if (snap.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snap.hasError) {
+                    return Center(child: Text(snap.error.toString()));
+                  }
+                  final keys = snap.data ?? const [];
+                  if (keys.isEmpty) {
+                    return Center(
+                      child: Text(l10n.noTrustedHostKeys),
+                    );
+                  }
+                  return ListView.separated(
+                    itemCount: keys.length,
+                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final k = keys[i];
+                      return ListTile(
+                        title: Text('${k.host}:${k.port}'),
+                        subtitle: Text(
+                          '${k.fingerprint}\n'
+                          '${l10n.firstSeen}: ${_fmt(context, k.firstSeenUnixMs)}    '
+                          '${l10n.lastSeen}: ${_fmt(context, k.lastSeenUnixMs)}',
+                          style: const TextStyle(
+                            fontFamily: 'Consolas',
+                            fontSize: 12,
+                          ),
+                        ),
+                        isThreeLine: true,
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: l10n.removeTrustedKeyTooltip,
+                          onPressed: () => _delete(k),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: _reload,
+          icon: const Icon(Icons.refresh, size: 16),
+          label: Text(l10n.refresh),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.close),
+        ),
+      ],
+    );
+  }
+}
+
 class _SettingsDialog extends StatefulWidget {
   const _SettingsDialog({required this.initial});
   final rust.Settings initial;
@@ -2318,6 +4073,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late final TextEditingController _fontFamily;
   late double _fontSize;
   late final TextEditingController _quakeHotkey;
+  late String _locale;
 
   @override
   void initState() {
@@ -2326,6 +4082,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _fontFamily = TextEditingController(text: widget.initial.fontFamily);
     _fontSize = widget.initial.fontSize > 0 ? widget.initial.fontSize : 13.0;
     _quakeHotkey = TextEditingController(text: widget.initial.quakeHotkey);
+    _locale = widget.initial.locale.isEmpty ? 'system' : widget.initial.locale;
   }
 
   @override
@@ -2337,41 +4094,58 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AlertDialog(
-      title: const Text('Settings'),
+      title: Text(l10n.settings),
       content: SizedBox(
         width: 420,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Padding(
-              padding: EdgeInsets.only(bottom: 4),
-              child: Text('Theme',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(l10n.language,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _locale,
+              items: [
+                DropdownMenuItem(value: 'system', child: Text(l10n.systemLanguage)),
+                DropdownMenuItem(value: 'en', child: Text(l10n.english)),
+                DropdownMenuItem(value: 'ko', child: Text(l10n.korean)),
+              ],
+              onChanged: (v) => setState(() => _locale = v ?? 'system'),
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(l10n.theme,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
             ),
             DropdownButtonFormField<String>(
               initialValue: _theme,
-              items: const [
-                DropdownMenuItem(value: 'dark', child: Text('Dark')),
-                DropdownMenuItem(value: 'light', child: Text('Light')),
+              items: [
+                DropdownMenuItem(value: 'dark', child: Text(l10n.dark)),
+                DropdownMenuItem(value: 'light', child: Text(l10n.light)),
               ],
               onChanged: (v) => setState(() => _theme = v ?? 'dark'),
             ),
             const SizedBox(height: 14),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 4),
-              child: Text('Terminal font',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(l10n.terminalFont,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
             ),
             TextField(
               controller: _fontFamily,
-              decoration:
-                  const InputDecoration(hintText: 'Consolas, Cascadia Mono, ...'),
+              decoration: const InputDecoration(
+                hintText: 'D2Coding, Cascadia Mono, Consolas, ...',
+              ),
             ),
             const SizedBox(height: 10),
             Row(children: [
-              Text('Size: ${_fontSize.toStringAsFixed(0)}',
+              Text(l10n.size(_fontSize.toStringAsFixed(0)),
                   style: const TextStyle(fontSize: 12)),
               Expanded(
                 child: Slider(
@@ -2385,15 +4159,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
             ]),
             const SizedBox(height: 14),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 4),
-              child: Text('Quake global hotkey',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(l10n.quakeGlobalHotkey,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF8AA0B5))),
             ),
             TextField(
               controller: _quakeHotkey,
-              decoration: const InputDecoration(
-                hintText: 'e.g. F12 (toggles window show/hide)',
+              decoration: InputDecoration(
+                hintText: l10n.quakeHotkeyHint,
               ),
             ),
           ],
@@ -2402,7 +4176,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(l10n.cancel),
         ),
         FilledButton(
           onPressed: () {
@@ -2415,10 +4189,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     : _fontFamily.text.trim(),
                 fontSize: _fontSize,
                 quakeHotkey: _quakeHotkey.text.trim(),
+                locale: _locale,
               ),
             );
           },
-          child: const Text('Save'),
+          child: Text(l10n.save),
         ),
       ],
     );

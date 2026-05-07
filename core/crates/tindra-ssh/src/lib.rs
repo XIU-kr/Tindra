@@ -68,7 +68,7 @@ pub async fn run_command_pubkey(
     });
 
     let mut session: Handle<TofuHandler> =
-        client::connect(config, (host.as_str(), port), TofuHandler).await?;
+        client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?;
     let authed = session
         .authenticate_publickey(username, Arc::new(key_pair))
         .await?;
@@ -138,7 +138,7 @@ async fn connect_via_jump(
 ) -> Result<(Handle<TofuHandler>, Handle<TofuHandler>), SshError> {
     let jump_key = russh::keys::load_secret_key(&jump.private_key_path, jump.passphrase.as_deref())?;
     let mut jump_handle: Handle<TofuHandler> =
-        client::connect(config.clone(), (jump.host.as_str(), jump.port), TofuHandler).await?;
+        client::connect(config.clone(), (jump.host.as_str(), jump.port), TofuHandler::new(jump.host.clone(), jump.port)).await?;
     let authed = jump_handle
         .authenticate_publickey(jump.username, Arc::new(jump_key))
         .await?;
@@ -147,11 +147,11 @@ async fn connect_via_jump(
     }
 
     let channel = jump_handle
-        .channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0)
+        .channel_open_direct_tcpip(target_host.clone(), target_port as u32, "127.0.0.1", 0)
         .await?;
     let stream = channel.into_stream();
     let target_handle: Handle<TofuHandler> =
-        client::connect_stream(config, stream, TofuHandler).await?;
+        client::connect_stream(config, stream, TofuHandler::new(target_host, target_port)).await?;
     Ok((jump_handle, target_handle))
 }
 
@@ -218,7 +218,7 @@ pub async fn open_shell_pubkey(
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
             None,
         ),
     };
@@ -374,7 +374,7 @@ pub async fn open_session_pubkey(
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
             None,
         ),
     };
@@ -400,7 +400,7 @@ pub async fn open_session_agent(
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
             None,
         ),
     };
@@ -633,7 +633,7 @@ pub async fn open_shell_agent(
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler).await?,
+            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
             None,
         ),
     };
@@ -707,9 +707,21 @@ async fn authenticate_via_agent(
 // Server-key handler
 // ---------------------------------------------------------------------------
 
-/// Trust-on-first-use handler. Phase 1 hardening will replace this with a
-/// known_hosts-backed implementation that prompts on fingerprint changes.
-pub struct TofuHandler;
+/// Trust-on-first-use host-key handler backed by tindra-store.
+///
+/// First connection to `host:port` records the server key fingerprint. Later
+/// connections must present the same fingerprint; a changed key is rejected so
+/// the UI can surface a host-key warning instead of silently continuing.
+pub struct TofuHandler {
+    host: String,
+    port: u16,
+}
+
+impl TofuHandler {
+    pub fn new(host: String, port: u16) -> Self {
+        Self { host, port }
+    }
+}
 
 #[async_trait]
 impl client::Handler for TofuHandler {
@@ -717,8 +729,21 @@ impl client::Handler for TofuHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::key::PublicKey,
+        server_public_key: &russh::keys::key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let fingerprint = server_public_key.fingerprint();
+        match tindra_store::verify_or_trust_host_key(
+            self.host.clone(),
+            self.port,
+            fingerprint,
+        )
+        .await
+        {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                tracing::warn!("server host key rejected: {e}");
+                Ok(false)
+            }
+        }
     }
 }

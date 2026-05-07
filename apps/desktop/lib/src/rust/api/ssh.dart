@@ -7,8 +7,8 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `jump_to_core_pub`, `jump_to_core`, `meta_registry`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `SessionMeta`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `SessionBackend`, `SessionMeta`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Phase 8d framework hook — best-effort detection of the ZMODEM ZRQINIT
 /// header in raw remote output. Returns true when a sender is starting a
@@ -51,6 +51,18 @@ Future<BigInt> openShellPubkey({
   cols: cols,
   rows: rows,
   jump: jump,
+);
+
+/// Open a local shell using the platform PTY (Windows ConPTY/winpty,
+/// POSIX PTY elsewhere). Empty `shell` uses the platform default.
+Future<BigInt> openLocalShell({
+  String? shell,
+  required int cols,
+  required int rows,
+}) => RustLib.instance.api.crateApiSshOpenLocalShell(
+  shell: shell,
+  cols: cols,
+  rows: rows,
 );
 
 /// Phase 8c — open a Telnet (raw TCP) session.

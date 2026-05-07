@@ -100,3 +100,39 @@ pub async fn profiles_path() -> Result<String, String> {
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| e.to_string())
 }
+
+#[derive(Debug, Clone)]
+pub struct HostKey {
+    pub host: String,
+    pub port: u16,
+    pub fingerprint: String,
+    pub first_seen_unix_ms: u128,
+    pub last_seen_unix_ms: u128,
+}
+
+impl From<tindra_core::store::HostKeyEntry> for HostKey {
+    fn from(k: tindra_core::store::HostKeyEntry) -> Self {
+        HostKey {
+            host: k.host,
+            port: k.port,
+            fingerprint: k.fingerprint,
+            first_seen_unix_ms: k.first_seen_unix_ms,
+            last_seen_unix_ms: k.last_seen_unix_ms,
+        }
+    }
+}
+
+/// Trusted SSH host keys stored by trust-on-first-use.
+pub async fn list_host_keys() -> Result<Vec<HostKey>, String> {
+    tindra_core::store::list_host_keys()
+        .await
+        .map(|v| v.into_iter().map(HostKey::from).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Remove a trusted host key so the next connection can trust a new key.
+pub async fn delete_host_key(host: String, port: u16) -> Result<(), String> {
+    tindra_core::store::delete_host_key(host, port)
+        .await
+        .map_err(|e| e.to_string())
+}

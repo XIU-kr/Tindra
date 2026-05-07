@@ -6,6 +6,7 @@ pub struct Settings {
     pub font_family: String,
     pub font_size: f32,
     pub quake_hotkey: String,
+    pub locale: String,
 }
 
 impl From<tindra_core::store::Settings> for Settings {
@@ -15,6 +16,7 @@ impl From<tindra_core::store::Settings> for Settings {
             font_family: s.font_family,
             font_size: s.font_size,
             quake_hotkey: s.quake_hotkey,
+            locale: s.locale,
         }
     }
 }
@@ -30,6 +32,7 @@ impl From<Settings> for tindra_core::store::Settings {
             },
             font_size: if s.font_size <= 0.0 { 13.0 } else { s.font_size },
             quake_hotkey: s.quake_hotkey,
+            locale: if s.locale.is_empty() { "system".into() } else { s.locale },
         }
     }
 }

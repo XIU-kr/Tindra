@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`, `from`, `from`
 
 /// All saved profiles, sorted by name.
 Future<List<Profile>> listProfiles() =>
@@ -23,6 +23,49 @@ Future<void> deleteProfile({required String id}) =>
 /// Filesystem path of the on-disk profiles file (for diagnostics).
 Future<String> profilesPath() =>
     RustLib.instance.api.crateApiProfilesProfilesPath();
+
+/// Trusted SSH host keys stored by trust-on-first-use.
+Future<List<HostKey>> listHostKeys() =>
+    RustLib.instance.api.crateApiProfilesListHostKeys();
+
+/// Remove a trusted host key so the next connection can trust a new key.
+Future<void> deleteHostKey({required String host, required int port}) =>
+    RustLib.instance.api.crateApiProfilesDeleteHostKey(host: host, port: port);
+
+class HostKey {
+  final String host;
+  final int port;
+  final String fingerprint;
+  final BigInt firstSeenUnixMs;
+  final BigInt lastSeenUnixMs;
+
+  const HostKey({
+    required this.host,
+    required this.port,
+    required this.fingerprint,
+    required this.firstSeenUnixMs,
+    required this.lastSeenUnixMs,
+  });
+
+  @override
+  int get hashCode =>
+      host.hashCode ^
+      port.hashCode ^
+      fingerprint.hashCode ^
+      firstSeenUnixMs.hashCode ^
+      lastSeenUnixMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HostKey &&
+          runtimeType == other.runtimeType &&
+          host == other.host &&
+          port == other.port &&
+          fingerprint == other.fingerprint &&
+          firstSeenUnixMs == other.firstSeenUnixMs &&
+          lastSeenUnixMs == other.lastSeenUnixMs;
+}
 
 class Profile {
   /// Stable id. Empty string when calling upsert for a brand-new profile —

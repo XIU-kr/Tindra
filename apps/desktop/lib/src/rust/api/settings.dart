@@ -19,12 +19,14 @@ class Settings {
   final String fontFamily;
   final double fontSize;
   final String quakeHotkey;
+  final String locale;
 
   const Settings({
     required this.theme,
     required this.fontFamily,
     required this.fontSize,
     required this.quakeHotkey,
+    required this.locale,
   });
 
   @override
@@ -32,7 +34,8 @@ class Settings {
       theme.hashCode ^
       fontFamily.hashCode ^
       fontSize.hashCode ^
-      quakeHotkey.hashCode;
+      quakeHotkey.hashCode ^
+      locale.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -42,5 +45,6 @@ class Settings {
           theme == other.theme &&
           fontFamily == other.fontFamily &&
           fontSize == other.fontSize &&
-          quakeHotkey == other.quakeHotkey;
+          quakeHotkey == other.quakeHotkey &&
+          locale == other.locale;
 }
