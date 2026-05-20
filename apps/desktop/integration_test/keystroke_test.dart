@@ -62,82 +62,104 @@ void main() {
     }
   });
 
-  testWidgets('keystrokes reach the remote shell and echo back', (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets(
+    'keystrokes reach the remote shell and echo back',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
 
-    await tester.pumpWidget(const TindraApp());
+      await tester.pumpWidget(const TindraApp());
 
-    await _settle(tester, predicate: () => find.text(_localProfileName).evaluate().isNotEmpty);
+      await _settle(
+        tester,
+        predicate: () => find.text(_localProfileName).evaluate().isNotEmpty,
+      );
 
-    final openBtn = find.text('Open $_localProfileName');
-    expect(openBtn, findsOneWidget,
-        reason: 'sidebar should expose Open button for the test profile');
-    await tester.tap(openBtn);
+      final openBtn = find.text('Open $_localProfileName');
+      expect(
+        openBtn,
+        findsOneWidget,
+        reason: 'sidebar should expose Open button for the test profile',
+      );
+      await tester.tap(openBtn);
 
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _terminalContains(tester, RegExp(r'[>\$#]')),
-    );
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _terminalContains(tester, RegExp(r'[>\$#]')),
+      );
 
-    final terminalArea = find.byType(Focus).first;
-    await tester.tap(terminalArea);
-    await tester.pump();
+      final terminalArea = find.byType(Focus).first;
+      await tester.tap(terminalArea);
+      await tester.pump();
 
-    const marker = 'TINDRAOK';
-    for (final ch in 'echo $marker'.split('')) {
-      await tester.sendKeyEvent(_logicalKeyForChar(ch), character: ch);
-      await tester.pump(const Duration(milliseconds: 5));
-    }
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      const marker = 'TINDRAOK';
+      for (final ch in 'echo $marker'.split('')) {
+        await tester.sendKeyEvent(_logicalKeyForChar(ch), character: ch);
+        await tester.pump(const Duration(milliseconds: 5));
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
 
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 8),
-      predicate: () => _terminalContains(tester, RegExp(marker)),
-    );
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 8),
+        predicate: () => _terminalContains(tester, RegExp(marker)),
+      );
 
-    expect(_terminalContains(tester, RegExp(marker)), isTrue,
-        reason: 'remote echo of "$marker" should appear in terminal output');
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(
+        _terminalContains(tester, RegExp(marker)),
+        isTrue,
+        reason: 'remote echo of "$marker" should appear in terminal output',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 
-  testWidgets('Ctrl+C sends SIGINT byte (0x03) — observed via prompt return',
-      (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets(
+    'Ctrl+C sends SIGINT byte (0x03) — observed via prompt return',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
 
-    await tester.pumpWidget(const TindraApp());
-    await _settle(tester, predicate: () => find.text(_localProfileName).evaluate().isNotEmpty);
-    await tester.tap(find.text('Open $_localProfileName'));
+      await tester.pumpWidget(const TindraApp());
+      await _settle(
+        tester,
+        predicate: () => find.text(_localProfileName).evaluate().isNotEmpty,
+      );
+      await tester.tap(find.text('Open $_localProfileName'));
 
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _terminalContains(tester, RegExp(r'[>\$#]')),
-    );
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _terminalContains(tester, RegExp(r'[>\$#]')),
+      );
 
-    final terminalArea = find.byType(Focus).first;
-    await tester.tap(terminalArea);
-    await tester.pump();
+      final terminalArea = find.byType(Focus).first;
+      await tester.tap(terminalArea);
+      await tester.pump();
 
-    final beforeLen = _terminalPlainText(tester).length;
+      final beforeLen = _terminalPlainText(tester).length;
 
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 5),
-      predicate: () => _terminalPlainText(tester).length > beforeLen,
-    );
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 5),
+        predicate: () => _terminalPlainText(tester).length > beforeLen,
+      );
 
-    expect(_terminalPlainText(tester).length, greaterThan(beforeLen),
-        reason: 'Ctrl+C should produce some terminal output (new prompt)');
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(
+        _terminalPlainText(tester).length,
+        greaterThan(beforeLen),
+        reason: 'Ctrl+C should produce some terminal output (new prompt)',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 }
 
 Future<void> _settle(

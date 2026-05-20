@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "sh.tindra" "\0"
-            VALUE "FileDescription", "tindra_desktop" "\0"
+            VALUE "CompanyName", "Tindra" "\0"
+            VALUE "FileDescription", "Tindra SSH Client" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "tindra_desktop" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 sh.tindra. All rights reserved." "\0"
+            VALUE "InternalName", "Tindra" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 The Tindra Authors. All rights reserved." "\0"
             VALUE "OriginalFilename", "tindra_desktop.exe" "\0"
-            VALUE "ProductName", "tindra_desktop" "\0"
+            VALUE "ProductName", "Tindra" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

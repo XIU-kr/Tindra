@@ -54,67 +54,82 @@ void main() {
     }
   });
 
-  testWidgets('open two sessions, switch tabs, close one', (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets(
+    'open two sessions, switch tabs, close one',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
 
-    await tester.pumpWidget(const TindraApp());
-    await _settle(tester,
-        predicate: () => find.text(_profileName).evaluate().isNotEmpty);
+      await tester.pumpWidget(const TindraApp());
+      await _settle(
+        tester,
+        predicate: () => find.text(_profileName).evaluate().isNotEmpty,
+      );
 
-    // ---- Open first tab via the sidebar's "Open <name>" button ----
-    await tester.tap(find.text('Open $_profileName'));
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _terminalContains(tester, RegExp(r'[>\$#]')),
-    );
-    expect(_visibleTabCount(tester), 1, reason: 'first tab should appear');
+      // ---- Open first tab via the sidebar's "Open <name>" button ----
+      await tester.tap(find.text('Open $_profileName'));
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _terminalContains(tester, RegExp(r'[>\$#]')),
+      );
+      expect(_visibleTabCount(tester), 1, reason: 'first tab should appear');
 
-    // ---- Open second tab via the trailing "+" in the tab bar ----
-    final addButtons = find.byTooltip('Open $_profileName');
-    expect(addButtons, findsWidgets,
-        reason: 'tab-bar + button should reuse the selected profile name');
-    // First widget is the sidebar button, the trailing one in the tab bar is
-    // the IconButton with the same tooltip.
-    final trailingPlus = addButtons.evaluate().toList().last;
-    await tester.tap(find.byWidget(trailingPlus.widget));
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _visibleTabCount(tester) == 2,
-    );
-    expect(_visibleTabCount(tester), 2, reason: 'second tab should appear');
+      // ---- Open second tab via the trailing "+" in the tab bar ----
+      final addButtons = find.byTooltip('Open $_profileName');
+      expect(
+        addButtons,
+        findsWidgets,
+        reason: 'tab-bar + button should reuse the selected profile name',
+      );
+      // First widget is the sidebar button, the trailing one in the tab bar is
+      // the IconButton with the same tooltip.
+      final trailingPlus = addButtons.evaluate().toList().last;
+      await tester.tap(find.byWidget(trailingPlus.widget));
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _visibleTabCount(tester) == 2,
+      );
+      expect(_visibleTabCount(tester), 2, reason: 'second tab should appear');
 
-    // Both tabs should eventually reach the connected (green dot) state.
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _connectedTabCount(tester) >= 2,
-    );
-    expect(_connectedTabCount(tester), greaterThanOrEqualTo(2),
-        reason: 'both tabs should reach connected state');
+      // Both tabs should eventually reach the connected (green dot) state.
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _connectedTabCount(tester) >= 2,
+      );
+      expect(
+        _connectedTabCount(tester),
+        greaterThanOrEqualTo(2),
+        reason: 'both tabs should reach connected state',
+      );
 
-    // ---- Switch to the first tab by tapping its label ----
-    final tabLabels = find.descendant(
-      of: find.byType(Material),
-      matching: find.text(_profileName),
-    );
-    expect(tabLabels.evaluate().length, greaterThanOrEqualTo(2),
-        reason: 'two tab labels should be findable');
-    await tester.tap(tabLabels.first);
-    await tester.pump(const Duration(milliseconds: 200));
+      // ---- Switch to the first tab by tapping its label ----
+      final tabLabels = find.descendant(
+        of: find.byType(Material),
+        matching: find.text(_profileName),
+      );
+      expect(
+        tabLabels.evaluate().length,
+        greaterThanOrEqualTo(2),
+        reason: 'two tab labels should be findable',
+      );
+      await tester.tap(tabLabels.first);
+      await tester.pump(const Duration(milliseconds: 200));
 
-    // ---- Close the first tab via the per-tab close button ----
-    await tester.tap(find.byKey(const ValueKey('tab-close-0')));
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 5),
-      predicate: () => _visibleTabCount(tester) == 1,
-    );
-    expect(_visibleTabCount(tester), 1, reason: 'one tab should remain');
-  }, timeout: const Timeout(Duration(minutes: 2)));
+      // ---- Close the first tab via the per-tab close button ----
+      await tester.tap(find.byKey(const ValueKey('tab-close-0')));
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 5),
+        predicate: () => _visibleTabCount(tester) == 1,
+      );
+      expect(_visibleTabCount(tester), 1, reason: 'one tab should remain');
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
 
 Future<void> _settle(
@@ -159,8 +174,9 @@ int _visibleTabCount(WidgetTester tester) {
 /// Connected tabs render a green (#FF4ADE80) dot.
 int _connectedTabCount(WidgetTester tester) {
   const greenDot = Color(0xFF4ADE80);
-  final connected =
-      tester.widgetList<Container>(find.byType(Container)).where((c) {
+  final connected = tester.widgetList<Container>(find.byType(Container)).where((
+    c,
+  ) {
     final box = c.constraints;
     if (box == null || box.maxWidth != 6 || box.maxHeight != 6) return false;
     final dec = c.decoration;

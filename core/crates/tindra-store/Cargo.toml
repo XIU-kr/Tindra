@@ -1,6 +1,6 @@
 [package]
 name = "tindra-store"
-description = "Encrypted local store for profiles, keys, snippets, host fingerprints (SQLCipher + age)."
+description = "Local store for profiles, settings, host fingerprints, and OS-backed secrets."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,5 +19,14 @@ argon2.workspace    = true
 serde.workspace     = true
 serde_json.workspace = true
 dirs.workspace      = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+keyring = { workspace = true, default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { workspace = true, default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 # rusqlite = { workspace = true }

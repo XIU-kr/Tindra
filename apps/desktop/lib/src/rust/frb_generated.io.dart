@@ -27,6 +27,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
+  RustStreamSink<SftpTransferProgress>
+  dco_decode_StreamSink_sftp_transfer_progress_Sse(dynamic raw);
+
+  @protected
   RustStreamSink<TerminalSnapshot> dco_decode_StreamSink_terminal_snapshot_Sse(
     dynamic raw,
   );
@@ -65,16 +69,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   HostKey dco_decode_host_key(dynamic raw);
 
   @protected
+  HostKeyCheck dco_decode_host_key_check(dynamic raw);
+
+  @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
   JumpHost dco_decode_jump_host(dynamic raw);
 
   @protected
+  List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
   List<Cell> dco_decode_list_cell(dynamic raw);
 
   @protected
   List<HostKey> dco_decode_list_host_key(dynamic raw);
+
+  @protected
+  List<LocalShellEnvVar> dco_decode_list_local_shell_env_var(dynamic raw);
 
   @protected
   List<PortForward> dco_decode_list_port_forward(dynamic raw);
@@ -92,6 +105,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<SftpEntry> dco_decode_list_sftp_entry(dynamic raw);
 
   @protected
+  LocalShellEnvVar dco_decode_local_shell_env_var(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
@@ -105,6 +121,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpEntry dco_decode_sftp_entry(dynamic raw);
+
+  @protected
+  SftpTransferProgress dco_decode_sftp_transfer_progress(dynamic raw);
 
   @protected
   TerminalSnapshot dco_decode_terminal_snapshot(dynamic raw);
@@ -126,6 +145,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
+  RustStreamSink<SftpTransferProgress>
+  sse_decode_StreamSink_sftp_transfer_progress_Sse(
+    SseDeserializer deserializer,
+  );
 
   @protected
   RustStreamSink<TerminalSnapshot> sse_decode_StreamSink_terminal_snapshot_Sse(
@@ -166,16 +191,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   HostKey sse_decode_host_key(SseDeserializer deserializer);
 
   @protected
+  HostKeyCheck sse_decode_host_key_check(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   JumpHost sse_decode_jump_host(SseDeserializer deserializer);
 
   @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
   List<Cell> sse_decode_list_cell(SseDeserializer deserializer);
 
   @protected
   List<HostKey> sse_decode_list_host_key(SseDeserializer deserializer);
+
+  @protected
+  List<LocalShellEnvVar> sse_decode_list_local_shell_env_var(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<PortForward> sse_decode_list_port_forward(SseDeserializer deserializer);
@@ -193,6 +229,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<SftpEntry> sse_decode_list_sftp_entry(SseDeserializer deserializer);
 
   @protected
+  LocalShellEnvVar sse_decode_local_shell_env_var(SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
@@ -206,6 +245,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SftpEntry sse_decode_sftp_entry(SseDeserializer deserializer);
+
+  @protected
+  SftpTransferProgress sse_decode_sftp_transfer_progress(
+    SseDeserializer deserializer,
+  );
 
   @protected
   TerminalSnapshot sse_decode_terminal_snapshot(SseDeserializer deserializer);
@@ -228,6 +272,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_AnyhowException(
     AnyhowException self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_sftp_transfer_progress_Sse(
+    RustStreamSink<SftpTransferProgress> self,
     SseSerializer serializer,
   );
 
@@ -274,16 +324,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_host_key(HostKey self, SseSerializer serializer);
 
   @protected
+  void sse_encode_host_key_check(HostKeyCheck self, SseSerializer serializer);
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_jump_host(JumpHost self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_cell(List<Cell> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_host_key(List<HostKey> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_local_shell_env_var(
+    List<LocalShellEnvVar> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_port_forward(
@@ -310,6 +372,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_local_shell_env_var(
+    LocalShellEnvVar self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
@@ -323,6 +391,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_sftp_entry(SftpEntry self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_sftp_transfer_progress(
+    SftpTransferProgress self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_terminal_snapshot(

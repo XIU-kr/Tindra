@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use crate::frb_generated::StreamSink;
 use tindra_core::pty::detect_zrqinit;
 use tindra_core::term::{vt100::Parser, Snapshot as CoreSnapshot};
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 
 /// Phase 8d framework hook — best-effort detection of the ZMODEM ZRQINIT
 /// header in raw remote output. Returns true when a sender is starting a
@@ -91,6 +91,10 @@ pub struct TerminalSnapshot {
     pub cursor_row: u32,
     pub cursor_col: u32,
     pub cursor_visible: bool,
+    pub bracketed_paste_mode: bool,
+    pub mouse_reporting_mode: bool,
+    pub scrollback_position: u32,
+    pub bell: bool,
 }
 
 impl From<CoreSnapshot> for TerminalSnapshot {
@@ -122,6 +126,10 @@ impl From<CoreSnapshot> for TerminalSnapshot {
             cursor_row: s.cursor_row,
             cursor_col: s.cursor_col,
             cursor_visible: s.cursor_visible,
+            bracketed_paste_mode: false,
+            mouse_reporting_mode: false,
+            scrollback_position: 0,
+            bell: false,
         }
     }
 }
@@ -138,11 +146,87 @@ struct SessionMeta {
     /// can update its dimensions while shell_output_stream keeps reading.
     parser: Arc<Mutex<Parser>>,
     backend: SessionBackend,
+    snapshots: broadcast::Sender<TerminalSnapshot>,
 }
 
 fn meta_registry() -> &'static Mutex<HashMap<u64, SessionMeta>> {
     static R: OnceLock<Mutex<HashMap<u64, SessionMeta>>> = OnceLock::new();
     R.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+async fn register_session_meta(id: u64, rows: u32, cols: u32, backend: SessionBackend) {
+    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
+    let (snapshots, _) = broadcast::channel(256);
+    meta_registry().lock().await.insert(
+        id,
+        SessionMeta {
+            parser: parser.clone(),
+            backend,
+            snapshots: snapshots.clone(),
+        },
+    );
+    tokio::spawn(pump_session_output(id, parser, backend, snapshots));
+}
+
+fn chunk_has_terminal_bell(chunk: &[u8]) -> bool {
+    chunk.contains(&0x07)
+}
+
+async fn pump_session_output(
+    session_id: u64,
+    parser: Arc<Mutex<Parser>>,
+    backend: SessionBackend,
+    snapshots: broadcast::Sender<TerminalSnapshot>,
+) {
+    let Some(mut rx) = (match backend {
+        SessionBackend::Ssh => tindra_core::ssh::take_output_receiver(session_id).await,
+        SessionBackend::LocalPty => tindra_core::pty::take_output_receiver(session_id).await,
+    }) else {
+        meta_registry().lock().await.remove(&session_id);
+        return;
+    };
+
+    let mut bracketed_paste_mode = false;
+    let mut mouse_reporting_mode = false;
+    while let Some(chunk) = rx.recv().await {
+        let bell = chunk_has_terminal_bell(&chunk);
+        let mut snapshot: TerminalSnapshot = {
+            let mut p = parser.lock().await;
+            p.process(&chunk);
+            CoreSnapshot::from_parser(&p).into()
+        };
+        let chunk_text = String::from_utf8_lossy(&chunk);
+        if chunk_text.contains("\u{1b}[?2004h") {
+            bracketed_paste_mode = true;
+        }
+        if chunk_text.contains("\u{1b}[?2004l") {
+            bracketed_paste_mode = false;
+        }
+        if chunk_text.contains("\u{1b}[?1000h")
+            || chunk_text.contains("\u{1b}[?1002h")
+            || chunk_text.contains("\u{1b}[?1003h")
+            || chunk_text.contains("\u{1b}[?1006h")
+        {
+            mouse_reporting_mode = true;
+        }
+        if chunk_text.contains("\u{1b}[?1000l")
+            || chunk_text.contains("\u{1b}[?1002l")
+            || chunk_text.contains("\u{1b}[?1003l")
+            || chunk_text.contains("\u{1b}[?1006l")
+        {
+            mouse_reporting_mode = false;
+        }
+        snapshot.bracketed_paste_mode = bracketed_paste_mode;
+        snapshot.mouse_reporting_mode = mouse_reporting_mode;
+        snapshot.bell = bell;
+        snapshot.scrollback_position = {
+            let p = parser.lock().await;
+            p.screen().scrollback() as u32
+        };
+        let _ = snapshots.send(snapshot);
+    }
+
+    meta_registry().lock().await.remove(&session_id);
 }
 
 /// One hop in a jump chain. Empty `host` means "no jump" (sent that way
@@ -199,29 +283,134 @@ pub async fn open_shell_pubkey(
     )
     .await
     .map_err(|e| e.to_string())?;
-    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
-    meta_registry()
-        .lock()
+    register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
+    Ok(id)
+}
+
+pub async fn probe_host_key(
+    host: String,
+    port: u16,
+) -> Result<crate::api::profiles::HostKeyCheck, String> {
+    tindra_core::ssh::probe_host_key(host, port)
         .await
-        .insert(id, SessionMeta { parser, backend: SessionBackend::Ssh });
+        .map(|c| crate::api::profiles::HostKeyCheck {
+            status: c.status,
+            expected: c.expected,
+            actual: c.actual,
+        })
+        .map_err(|e| e.to_string())
+}
+
+pub async fn probe_host_key_via_jump(
+    host: String,
+    port: u16,
+    jump: JumpHost,
+) -> Result<crate::api::profiles::HostKeyCheck, String> {
+    let jump = jump_to_core(jump).ok_or_else(|| "jump host is required".to_string())?;
+    tindra_core::ssh::probe_host_key_via_jump(jump, host, port)
+        .await
+        .map(|c| crate::api::profiles::HostKeyCheck {
+            status: c.status,
+            expected: c.expected,
+            actual: c.actual,
+        })
+        .map_err(|e| e.to_string())
+}
+
+pub async fn open_shell_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    cols: u32,
+    rows: u32,
+    jump: JumpHost,
+) -> Result<u64, String> {
+    let id = tindra_core::ssh::open_shell_password(
+        host,
+        port,
+        username,
+        password,
+        cols,
+        rows,
+        jump_to_core(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
+    Ok(id)
+}
+
+pub async fn open_shell_keyboard_interactive(
+    host: String,
+    port: u16,
+    username: String,
+    responses: Vec<String>,
+    cols: u32,
+    rows: u32,
+    jump: JumpHost,
+) -> Result<u64, String> {
+    let id = tindra_core::ssh::open_shell_keyboard_interactive(
+        host,
+        port,
+        username,
+        responses,
+        cols,
+        rows,
+        jump_to_core(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
     Ok(id)
 }
 
 /// Open a local shell using the platform PTY (Windows ConPTY/winpty,
 /// POSIX PTY elsewhere). Empty `shell` uses the platform default.
-pub async fn open_local_shell(
-    shell: Option<String>,
-    cols: u32,
-    rows: u32,
-) -> Result<u64, String> {
+pub async fn open_local_shell(shell: Option<String>, cols: u32, rows: u32) -> Result<u64, String> {
     let id = tindra_core::pty::open_local_shell(shell, cols, rows)
         .await
         .map_err(|e| e.to_string())?;
-    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
-    meta_registry()
-        .lock()
-        .await
-        .insert(id, SessionMeta { parser, backend: SessionBackend::LocalPty });
+    register_session_meta(id, rows, cols, SessionBackend::LocalPty).await;
+    Ok(id)
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalShellEnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+pub async fn open_local_shell_with_options(
+    shell: Option<String>,
+    cwd: Option<String>,
+    env: Vec<LocalShellEnvVar>,
+    cols: u32,
+    rows: u32,
+) -> Result<u64, String> {
+    let id = tindra_core::pty::open_local_shell_with_options(
+        tindra_core::pty::LocalShellOptions {
+            shell,
+            cwd: cwd.and_then(|p| {
+                let trimmed = p.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(trimmed))
+                }
+            }),
+            env: env
+                .into_iter()
+                .filter(|e| !e.name.trim().is_empty())
+                .map(|e| (e.name, e.value))
+                .collect(),
+        },
+        cols,
+        rows,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    register_session_meta(id, rows, cols, SessionBackend::LocalPty).await;
     Ok(id)
 }
 
@@ -235,11 +424,7 @@ pub async fn open_shell_telnet(
     let id = tindra_core::ssh::open_shell_telnet(host, port, cols, rows)
         .await
         .map_err(|e| e.to_string())?;
-    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
-    meta_registry()
-        .lock()
-        .await
-        .insert(id, SessionMeta { parser, backend: SessionBackend::Ssh });
+    register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
     Ok(id)
 }
 
@@ -252,56 +437,63 @@ pub async fn open_shell_agent(
     rows: u32,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    let id = tindra_core::ssh::open_shell_agent(host, port, username, cols, rows, jump_to_core(jump))
-        .await
-        .map_err(|e| e.to_string())?;
-    let parser = Arc::new(Mutex::new(Parser::new(rows as u16, cols as u16, 1000)));
-    meta_registry()
-        .lock()
-        .await
-        .insert(id, SessionMeta { parser, backend: SessionBackend::Ssh });
+    let id =
+        tindra_core::ssh::open_shell_agent(host, port, username, cols, rows, jump_to_core(jump))
+            .await
+            .map_err(|e| e.to_string())?;
+    register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
     Ok(id)
 }
 
-/// Stream of terminal snapshots. Bytes from the SSH session are fed into a
-/// per-session vt100::Parser; after each chunk a fresh `TerminalSnapshot` is
-/// pushed. Call this exactly once per session.
+/// Stream of terminal snapshots. A background pump owns the single core output
+/// receiver and broadcasts parsed snapshots, so multiple Flutter windows can
+/// subscribe to the same live session.
 pub async fn shell_output_stream(
     session_id: u64,
     sink: StreamSink<TerminalSnapshot>,
 ) -> Result<(), String> {
-    let (parser, backend) = {
+    let mut rx = {
         let reg = meta_registry().lock().await;
         let meta = reg
             .get(&session_id)
             .ok_or_else(|| format!("session {session_id} unknown"))?;
-        (meta.parser.clone(), meta.backend)
+        meta.snapshots.subscribe()
     };
-    let mut rx = match backend {
-        SessionBackend::Ssh => tindra_core::ssh::take_output_receiver(session_id).await,
-        SessionBackend::LocalPty => tindra_core::pty::take_output_receiver(session_id).await,
-    }
-    .ok_or_else(|| format!("session {session_id} not found or already subscribed"))?;
 
-    while let Some(chunk) = rx.recv().await {
-        let snapshot: TerminalSnapshot = {
-            let mut p = parser.lock().await;
-            p.process(&chunk);
-            CoreSnapshot::from_parser(&p).into()
+    loop {
+        let snapshot = match rx.recv().await {
+            Ok(snapshot) => snapshot,
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
         };
         if sink.add(snapshot).is_err() {
             break;
         }
     }
-
-    meta_registry().lock().await.remove(&session_id);
     Ok(())
+}
+
+pub async fn shell_set_scrollback(session_id: u64, rows: u32) -> Result<TerminalSnapshot, String> {
+    let parser = {
+        let reg = meta_registry().lock().await;
+        reg.get(&session_id)
+            .map(|m| m.parser.clone())
+            .ok_or_else(|| format!("session {session_id} unknown"))?
+    };
+    let mut p = parser.lock().await;
+    p.screen_mut().set_scrollback(rows as usize);
+    let mut snapshot: TerminalSnapshot = CoreSnapshot::from_parser(&p).into();
+    snapshot.scrollback_position = p.screen().scrollback() as u32;
+    snapshot.bell = false;
+    Ok(snapshot)
 }
 
 pub async fn shell_write(session_id: u64, data: Vec<u8>) -> Result<(), String> {
     let backend = {
         let reg = meta_registry().lock().await;
-        reg.get(&session_id).map(|m| m.backend).unwrap_or(SessionBackend::Ssh)
+        reg.get(&session_id)
+            .map(|m| m.backend)
+            .unwrap_or(SessionBackend::Ssh)
     };
     match backend {
         SessionBackend::Ssh => tindra_core::ssh::shell_write(session_id, data)
@@ -318,7 +510,9 @@ pub async fn shell_write(session_id: u64, data: Vec<u8>) -> Result<(), String> {
 pub async fn shell_resize(session_id: u64, cols: u32, rows: u32) -> Result<(), String> {
     let backend = {
         let reg = meta_registry().lock().await;
-        reg.get(&session_id).map(|m| m.backend).unwrap_or(SessionBackend::Ssh)
+        reg.get(&session_id)
+            .map(|m| m.backend)
+            .unwrap_or(SessionBackend::Ssh)
     };
     match backend {
         SessionBackend::Ssh => tindra_core::ssh::shell_resize(session_id, cols, rows)
@@ -352,5 +546,22 @@ pub async fn shell_close(session_id: u64) -> Result<(), String> {
         SessionBackend::LocalPty => tindra_core::pty::local_shell_close(session_id)
             .await
             .map_err(|e| e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chunk_has_terminal_bell;
+
+    #[test]
+    fn detects_terminal_bell_control_byte() {
+        assert!(chunk_has_terminal_bell(b"build complete\x07"));
+        assert!(chunk_has_terminal_bell(&[0x1b, b']', b'0', 0x07]));
+    }
+
+    #[test]
+    fn ignores_chunks_without_terminal_bell() {
+        assert!(!chunk_has_terminal_bell(b"plain output"));
+        assert!(!chunk_has_terminal_bell(&[0x1b, b'[', b'?']));
     }
 }

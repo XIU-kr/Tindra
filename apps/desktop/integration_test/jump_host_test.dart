@@ -21,59 +21,67 @@ void main() {
     await RustLib.init();
   });
 
-  test('openShellPubkey accepts JumpHost without crashing', () async {
-    BigInt? sessionId;
-    String? error;
-    try {
-      sessionId = await rust
-          .openShellPubkey(
-            host: 'localhost',
-            port: 22,
-            username: 'XIU',
-            privateKeyPath: _keyPath,
-            passphrase: null,
-            cols: 120,
-            rows: 32,
-            jump: const rust.JumpHost(
+  test(
+    'openShellPubkey accepts JumpHost without crashing',
+    () async {
+      BigInt? sessionId;
+      String? error;
+      try {
+        sessionId = await rust
+            .openShellPubkey(
               host: 'localhost',
               port: 22,
               username: 'XIU',
               privateKeyPath: _keyPath,
               passphrase: null,
-            ),
-          )
-          .timeout(const Duration(seconds: 8));
-    } catch (e) {
-      error = e.toString();
-    }
+              cols: 120,
+              rows: 32,
+              jump: const rust.JumpHost(
+                host: 'localhost',
+                port: 22,
+                username: 'XIU',
+                privateKeyPath: _keyPath,
+                passphrase: null,
+              ),
+            )
+            .timeout(const Duration(seconds: 8));
+      } catch (e) {
+        error = e.toString();
+      }
 
-    if (sessionId != null) {
-      // Local SSH server allowed the loop — close cleanly.
-      await rust.shellClose(sessionId: sessionId);
-    } else {
-      // Expected: loop guard or timeout. Either way the FFI surface is alive.
-      expect(error, isNotNull);
-    }
-  }, timeout: const Timeout(Duration(seconds: 15)));
+      if (sessionId != null) {
+        // Local SSH server allowed the loop — close cleanly.
+        await rust.shellClose(sessionId: sessionId);
+      } else {
+        // Expected: loop guard or timeout. Either way the FFI surface is alive.
+        expect(error, isNotNull);
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 15)),
+  );
 
-  test('openShellPubkey works without a jump host (regression)', () async {
-    final id = await rust.openShellPubkey(
-      host: 'localhost',
-      port: 22,
-      username: 'XIU',
-      privateKeyPath: _keyPath,
-      passphrase: null,
-      cols: 120,
-      rows: 32,
-      jump: const rust.JumpHost(
-        host: '',
+  test(
+    'openShellPubkey works without a jump host (regression)',
+    () async {
+      final id = await rust.openShellPubkey(
+        host: 'localhost',
         port: 22,
-        username: '',
-        privateKeyPath: '',
+        username: 'XIU',
+        privateKeyPath: _keyPath,
         passphrase: null,
-      ),
-    );
-    expect(id, isNotNull);
-    await rust.shellClose(sessionId: id);
-  }, timeout: const Timeout(Duration(seconds: 15)));
+        cols: 120,
+        rows: 32,
+        jump: const rust.JumpHost(
+          host: '',
+          port: 22,
+          username: '',
+          privateKeyPath: '',
+          passphrase: null,
+        ),
+      );
+      expect(id, isNotNull);
+      await rust.shellClose(sessionId: id);
+    },
+    timeout: const Timeout(Duration(seconds: 15)),
+  );
 }

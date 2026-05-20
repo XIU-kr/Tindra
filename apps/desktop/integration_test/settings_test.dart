@@ -60,26 +60,37 @@ void main() {
     }
   });
 
-  test('Settings round-trip: save → file on disk → load returns same values',
-      () async {
-    final wanted = const rust.Settings(
-      theme: 'light',
-      fontFamily: 'Cascadia Mono',
-      fontSize: 16.0,
-      quakeHotkey: 'F12',
-      locale: 'ko',
-    );
-    await rust.saveSettings(settings: wanted);
-    expect(settingsFile.existsSync(), isTrue,
-        reason: 'settings.json should be created');
+  test(
+    'Settings round-trip: save → file on disk → load returns same values',
+    () async {
+      final wanted = const rust.Settings(
+        theme: 'light',
+        fontFamily: 'Cascadia Mono',
+        fontSize: 16.0,
+        quakeHotkey: 'F12',
+        locale: 'ko',
+        localShell: 'pwsh.exe',
+        localShellCwd: r'C:\',
+        localShellEnv: 'TINDRA_TEST=1',
+      );
+      await rust.saveSettings(settings: wanted);
+      expect(
+        settingsFile.existsSync(),
+        isTrue,
+        reason: 'settings.json should be created',
+      );
 
-    final loaded = await rust.loadSettings();
-    expect(loaded.theme, 'light');
-    expect(loaded.fontFamily, 'Cascadia Mono');
-    expect(loaded.fontSize, 16.0);
-    expect(loaded.quakeHotkey, 'F12');
-    expect(loaded.locale, 'ko');
-  });
+      final loaded = await rust.loadSettings();
+      expect(loaded.theme, 'light');
+      expect(loaded.fontFamily, 'Cascadia Mono');
+      expect(loaded.fontSize, 16.0);
+      expect(loaded.quakeHotkey, 'F12');
+      expect(loaded.locale, 'ko');
+      expect(loaded.localShell, 'pwsh.exe');
+      expect(loaded.localShellCwd, r'C:\');
+      expect(loaded.localShellEnv, 'TINDRA_TEST=1');
+    },
+  );
 
   test('Settings load returns defaults when file missing', () async {
     if (settingsFile.existsSync()) settingsFile.deleteSync();
@@ -89,43 +100,51 @@ void main() {
     expect(loaded.fontSize, 13.0);
   });
 
-  testWidgets('Ctrl+T opens a new tab; Ctrl+W closes it', (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets(
+    'Ctrl+T opens a new tab; Ctrl+W closes it',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
 
-    await tester.pumpWidget(const TindraApp());
-    await _settle(tester,
-        predicate: () => find.text(_profileName).evaluate().isNotEmpty);
+      await tester.pumpWidget(const TindraApp());
+      await _settle(
+        tester,
+        predicate: () => find.text(_profileName).evaluate().isNotEmpty,
+      );
 
-    expect(_visibleTabCount(tester), 0,
-        reason: 'no tabs at startup');
+      expect(_visibleTabCount(tester), 0, reason: 'no tabs at startup');
 
-    // Ctrl+T → opens a tab on the selected profile.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      // Ctrl+T → opens a tab on the selected profile.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _visibleTabCount(tester) == 1,
-    );
-    expect(_visibleTabCount(tester), 1, reason: 'Ctrl+T should open a tab');
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _visibleTabCount(tester) == 1,
+      );
+      expect(_visibleTabCount(tester), 1, reason: 'Ctrl+T should open a tab');
 
-    // Ctrl+W → closes the active tab.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      // Ctrl+W → closes the active tab.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 5),
-      predicate: () => _visibleTabCount(tester) == 0,
-    );
-    expect(_visibleTabCount(tester), 0,
-        reason: 'Ctrl+W should close the only tab');
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 5),
+        predicate: () => _visibleTabCount(tester) == 0,
+      );
+      expect(
+        _visibleTabCount(tester),
+        0,
+        reason: 'Ctrl+W should close the only tab',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 }
 
 Future<void> _settle(

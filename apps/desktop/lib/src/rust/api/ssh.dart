@@ -5,10 +5,11 @@
 
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'profiles.dart';
 
-// These functions are ignored because they are not marked as `pub`: `jump_to_core_pub`, `jump_to_core`, `meta_registry`
+// These functions are ignored because they are not marked as `pub`: `jump_to_core_pub`, `jump_to_core`, `meta_registry`, `pump_session_output`, `register_session_meta`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `SessionBackend`, `SessionMeta`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Phase 8d framework hook — best-effort detection of the ZMODEM ZRQINIT
 /// header in raw remote output. Returns true when a sender is starting a
@@ -53,6 +54,55 @@ Future<BigInt> openShellPubkey({
   jump: jump,
 );
 
+Future<HostKeyCheck> probeHostKey({required String host, required int port}) =>
+    RustLib.instance.api.crateApiSshProbeHostKey(host: host, port: port);
+
+Future<HostKeyCheck> probeHostKeyViaJump({
+  required String host,
+  required int port,
+  required JumpHost jump,
+}) => RustLib.instance.api.crateApiSshProbeHostKeyViaJump(
+  host: host,
+  port: port,
+  jump: jump,
+);
+
+Future<BigInt> openShellPassword({
+  required String host,
+  required int port,
+  required String username,
+  required String password,
+  required int cols,
+  required int rows,
+  required JumpHost jump,
+}) => RustLib.instance.api.crateApiSshOpenShellPassword(
+  host: host,
+  port: port,
+  username: username,
+  password: password,
+  cols: cols,
+  rows: rows,
+  jump: jump,
+);
+
+Future<BigInt> openShellKeyboardInteractive({
+  required String host,
+  required int port,
+  required String username,
+  required List<String> responses,
+  required int cols,
+  required int rows,
+  required JumpHost jump,
+}) => RustLib.instance.api.crateApiSshOpenShellKeyboardInteractive(
+  host: host,
+  port: port,
+  username: username,
+  responses: responses,
+  cols: cols,
+  rows: rows,
+  jump: jump,
+);
+
 /// Open a local shell using the platform PTY (Windows ConPTY/winpty,
 /// POSIX PTY elsewhere). Empty `shell` uses the platform default.
 Future<BigInt> openLocalShell({
@@ -61,6 +111,20 @@ Future<BigInt> openLocalShell({
   required int rows,
 }) => RustLib.instance.api.crateApiSshOpenLocalShell(
   shell: shell,
+  cols: cols,
+  rows: rows,
+);
+
+Future<BigInt> openLocalShellWithOptions({
+  String? shell,
+  String? cwd,
+  required List<LocalShellEnvVar> env,
+  required int cols,
+  required int rows,
+}) => RustLib.instance.api.crateApiSshOpenLocalShellWithOptions(
+  shell: shell,
+  cwd: cwd,
+  env: env,
   cols: cols,
   rows: rows,
 );
@@ -95,11 +159,19 @@ Future<BigInt> openShellAgent({
   jump: jump,
 );
 
-/// Stream of terminal snapshots. Bytes from the SSH session are fed into a
-/// per-session vt100::Parser; after each chunk a fresh `TerminalSnapshot` is
-/// pushed. Call this exactly once per session.
+/// Stream of terminal snapshots. A background pump owns the single core output
+/// receiver and broadcasts parsed snapshots, so multiple Flutter windows can
+/// subscribe to the same live session.
 Stream<TerminalSnapshot> shellOutputStream({required BigInt sessionId}) =>
     RustLib.instance.api.crateApiSshShellOutputStream(sessionId: sessionId);
+
+Future<TerminalSnapshot> shellSetScrollback({
+  required BigInt sessionId,
+  required int rows,
+}) => RustLib.instance.api.crateApiSshShellSetScrollback(
+  sessionId: sessionId,
+  rows: rows,
+);
 
 Future<void> shellWrite({required BigInt sessionId, required List<int> data}) =>
     RustLib.instance.api.crateApiSshShellWrite(
@@ -242,6 +314,24 @@ class JumpHost {
           passphrase == other.passphrase;
 }
 
+class LocalShellEnvVar {
+  final String name;
+  final String value;
+
+  const LocalShellEnvVar({required this.name, required this.value});
+
+  @override
+  int get hashCode => name.hashCode ^ value.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LocalShellEnvVar &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          value == other.value;
+}
+
 /// One frame of terminal state.
 class TerminalSnapshot {
   final int rows;
@@ -255,6 +345,10 @@ class TerminalSnapshot {
   final int cursorRow;
   final int cursorCol;
   final bool cursorVisible;
+  final bool bracketedPasteMode;
+  final bool mouseReportingMode;
+  final int scrollbackPosition;
+  final bool bell;
 
   const TerminalSnapshot({
     required this.rows,
@@ -264,6 +358,10 @@ class TerminalSnapshot {
     required this.cursorRow,
     required this.cursorCol,
     required this.cursorVisible,
+    required this.bracketedPasteMode,
+    required this.mouseReportingMode,
+    required this.scrollbackPosition,
+    required this.bell,
   });
 
   @override
@@ -274,7 +372,11 @@ class TerminalSnapshot {
       cells.hashCode ^
       cursorRow.hashCode ^
       cursorCol.hashCode ^
-      cursorVisible.hashCode;
+      cursorVisible.hashCode ^
+      bracketedPasteMode.hashCode ^
+      mouseReportingMode.hashCode ^
+      scrollbackPosition.hashCode ^
+      bell.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -287,5 +389,9 @@ class TerminalSnapshot {
           cells == other.cells &&
           cursorRow == other.cursorRow &&
           cursorCol == other.cursorCol &&
-          cursorVisible == other.cursorVisible;
+          cursorVisible == other.cursorVisible &&
+          bracketedPasteMode == other.bracketedPasteMode &&
+          mouseReportingMode == other.mouseReportingMode &&
+          scrollbackPosition == other.scrollbackPosition &&
+          bell == other.bell;
 }

@@ -18,17 +18,24 @@ void main() {
     await RustLib.init();
   });
 
-  test('Telnet open against a closed port surfaces an error', () async {
-    String? error;
-    try {
-      // Port 1 is virtually always closed/unbound on a desktop.
-      await rust
-          .openShellTelnet(host: '127.0.0.1', port: 1, cols: 80, rows: 24)
-          .timeout(const Duration(seconds: 5));
-    } catch (e) {
-      error = e.toString();
-    }
-    expect(error, isNotNull,
-        reason: 'connecting to a closed TCP port must fail or time out');
-  }, timeout: const Timeout(Duration(seconds: 15)));
+  test(
+    'Telnet open against a closed port surfaces an error',
+    () async {
+      String? error;
+      try {
+        // Port 1 is virtually always closed/unbound on a desktop.
+        await rust
+            .openShellTelnet(host: '127.0.0.1', port: 1, cols: 80, rows: 24)
+            .timeout(const Duration(seconds: 5));
+      } catch (e) {
+        error = e.toString();
+      }
+      expect(
+        error,
+        isNotNull,
+        reason: 'connecting to a closed TCP port must fail or time out',
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 15)),
+  );
 }

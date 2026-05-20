@@ -11,7 +11,7 @@ pub struct Profile {
     pub username: String,
     pub private_key_path: String,
     pub notes: String,
-    /// "key" or "agent". Defaults to "key" when reading older profiles.
+    /// "key", "agent", or "password". Defaults to "key" when reading older profiles.
     pub auth_method: String,
     /// Optional jump host. Empty `jump_host` means no jump.
     pub jump_host: String,
@@ -110,6 +110,14 @@ pub struct HostKey {
     pub last_seen_unix_ms: u128,
 }
 
+#[derive(Debug, Clone)]
+pub struct HostKeyCheck {
+    /// "new", "trusted", or "changed".
+    pub status: String,
+    pub expected: String,
+    pub actual: String,
+}
+
 impl From<tindra_core::store::HostKeyEntry> for HostKey {
     fn from(k: tindra_core::store::HostKeyEntry) -> Self {
         HostKey {
@@ -127,6 +135,29 @@ pub async fn list_host_keys() -> Result<Vec<HostKey>, String> {
     tindra_core::store::list_host_keys()
         .await
         .map(|v| v.into_iter().map(HostKey::from).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Check a fingerprint without trusting or updating it.
+pub async fn check_host_key(
+    host: String,
+    port: u16,
+    fingerprint: String,
+) -> Result<HostKeyCheck, String> {
+    tindra_core::store::check_host_key(host, port, fingerprint)
+        .await
+        .map(|c| HostKeyCheck {
+            status: c.status,
+            expected: c.expected,
+            actual: c.actual,
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Store a host key only after explicit user approval.
+pub async fn trust_host_key(host: String, port: u16, fingerprint: String) -> Result<(), String> {
+    tindra_core::store::trust_host_key(host, port, fingerprint)
+        .await
         .map_err(|e| e.to_string())
 }
 

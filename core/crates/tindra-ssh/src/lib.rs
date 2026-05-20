@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// tindra-ssh — SSH transport built on `russh`.
+// tindra-ssh ??SSH transport built on `russh`.
 //
 // Public surface:
 //   - `run_command_pubkey()` (Phase 1.0): one-shot SSH exec.
@@ -18,8 +18,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use russh::client::Handle;
-use russh::{client, ChannelMsg, Disconnect};
+use russh::client::{Handle, KeyboardInteractiveAuthResponse};
+use russh::{client, Channel, ChannelMsg, Disconnect};
 use tokio::sync::{mpsc, Mutex};
 
 #[derive(Debug, thiserror::Error)]
@@ -34,10 +34,16 @@ pub enum SshError {
     AuthFailed,
     #[error("ssh-agent unavailable: {0}")]
     AgentUnavailable(String),
-    #[error("ssh-agent has no identities — run `ssh-add` first")]
+    #[error("ssh-agent has no identities ??run `ssh-add` first")]
     AgentNoIdentities,
     #[error("session {0} not found or already closed")]
     SessionNotFound(u64),
+    #[error("host key was not presented by the server")]
+    HostKeyUnavailable,
+    #[error("host-key store: {0}")]
+    HostKeyStore(String),
+    #[error("keyboard-interactive prompt has no configured response: {0}")]
+    KeyboardInteractiveMissingResponse(String),
 }
 
 /// Output of a one-shot remote command (`run_command_pubkey`).
@@ -49,7 +55,7 @@ pub struct CommandOutput {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1.0 — one-shot exec
+// Phase 1.0 ??one-shot exec
 // ---------------------------------------------------------------------------
 
 /// Run a single command on a remote host using ed25519/RSA private-key auth.
@@ -67,8 +73,12 @@ pub async fn run_command_pubkey(
         ..Default::default()
     });
 
-    let mut session: Handle<TofuHandler> =
-        client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?;
+    let mut session: Handle<TofuHandler> = client::connect(
+        config,
+        (host.as_str(), port),
+        TofuHandler::new(host.clone(), port),
+    )
+    .await?;
     let authed = session
         .authenticate_publickey(username, Arc::new(key_pair))
         .await?;
@@ -83,8 +93,7 @@ pub async fn run_command_pubkey(
     let mut stderr = String::new();
     let mut exit_code: Option<i32> = None;
 
-    // Drain channel until it closes naturally. Don't break on Eof/Close —
-    // Windows OpenSSH sends Eof BEFORE ExitStatus.
+    // Drain channel until it closes naturally. Don't break on Eof/Close ??    // Windows OpenSSH sends Eof BEFORE ExitStatus.
     while let Some(msg) = channel.wait().await {
         match msg {
             ChannelMsg::Data { ref data } => {
@@ -112,12 +121,11 @@ pub async fn run_command_pubkey(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4.1 — jump host (proxy via direct-tcpip)
+// Phase 4.1 ??jump host (proxy via direct-tcpip)
 // ---------------------------------------------------------------------------
 
 /// One hop in a jump-host chain. The current implementation supports a
-/// single hop. Authentication is private-key only — a future revision may
-/// allow agent-based jump auth.
+/// single hop authenticated with a private key.
 #[derive(Debug, Clone)]
 pub struct JumpParams {
     pub host: String,
@@ -128,17 +136,23 @@ pub struct JumpParams {
 }
 
 /// Open an SSH connection through a jump host. The jump session must stay
-/// alive for as long as the target session — the caller is responsible for
+/// alive for as long as the target session ??the caller is responsible for
 /// keeping the returned `(jump_handle, target_handle)` together.
 async fn connect_via_jump(
     jump: JumpParams,
     target_host: String,
     target_port: u16,
     config: Arc<client::Config>,
+    remote_forward_target: Option<(String, u16)>,
 ) -> Result<(Handle<TofuHandler>, Handle<TofuHandler>), SshError> {
-    let jump_key = russh::keys::load_secret_key(&jump.private_key_path, jump.passphrase.as_deref())?;
-    let mut jump_handle: Handle<TofuHandler> =
-        client::connect(config.clone(), (jump.host.as_str(), jump.port), TofuHandler::new(jump.host.clone(), jump.port)).await?;
+    let jump_key =
+        russh::keys::load_secret_key(&jump.private_key_path, jump.passphrase.as_deref())?;
+    let mut jump_handle: Handle<TofuHandler> = client::connect(
+        config.clone(),
+        (jump.host.as_str(), jump.port),
+        TofuHandler::new(jump.host.clone(), jump.port),
+    )
+    .await?;
     let authed = jump_handle
         .authenticate_publickey(jump.username, Arc::new(jump_key))
         .await?;
@@ -150,13 +164,22 @@ async fn connect_via_jump(
         .channel_open_direct_tcpip(target_host.clone(), target_port as u32, "127.0.0.1", 0)
         .await?;
     let stream = channel.into_stream();
+    let target_handler = match remote_forward_target {
+        Some((local_host, local_port)) => TofuHandler::new_remote_forward(
+            target_host.clone(),
+            target_port,
+            local_host,
+            local_port,
+        ),
+        None => TofuHandler::new(target_host.clone(), target_port),
+    };
     let target_handle: Handle<TofuHandler> =
-        client::connect_stream(config, stream, TofuHandler::new(target_host, target_port)).await?;
+        client::connect_stream(config, stream, target_handler).await?;
     Ok((jump_handle, target_handle))
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1.1 — interactive shell session
+// Phase 1.1 ??interactive shell session
 // ---------------------------------------------------------------------------
 
 /// Internal command sent from the public API into a session's worker task.
@@ -177,7 +200,7 @@ struct ActiveShell {
     /// JoinHandle so it survives until the session is closed.
     _task: tokio::task::JoinHandle<()>,
     /// When the connection went through a jump host, we keep its handle
-    /// alive here — dropping it tears down the proxied stream.
+    /// alive here ??dropping it tears down the proxied stream.
     _jump_handle: Option<Handle<TofuHandler>>,
 }
 
@@ -214,11 +237,16 @@ pub async fn open_shell_pubkey(
 
     let (mut handle, jump_handle) = match jump {
         Some(j) => {
-            let (jh, th) = connect_via_jump(j, host.clone(), port, config).await?;
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config, None).await?;
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
             None,
         ),
     };
@@ -230,6 +258,80 @@ pub async fn open_shell_pubkey(
         return Err(SshError::AuthFailed);
     }
 
+    spawn_shell_worker(handle, jump_handle, cols, rows).await
+}
+
+pub async fn open_shell_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    cols: u32,
+    rows: u32,
+    jump: Option<JumpParams>,
+) -> Result<u64, SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config, None).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
+            None,
+        ),
+    };
+
+    let authed = handle
+        .authenticate_password(username.clone(), password.clone())
+        .await?;
+    if !authed {
+        authenticate_keyboard_interactive(&mut handle, &username, vec![password]).await?;
+    }
+
+    spawn_shell_worker(handle, jump_handle, cols, rows).await
+}
+
+pub async fn open_shell_keyboard_interactive(
+    host: String,
+    port: u16,
+    username: String,
+    responses: Vec<String>,
+    cols: u32,
+    rows: u32,
+    jump: Option<JumpParams>,
+) -> Result<u64, SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config, None).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
+            None,
+        ),
+    };
+
+    authenticate_keyboard_interactive(&mut handle, &username, responses).await?;
     spawn_shell_worker(handle, jump_handle, cols, rows).await
 }
 
@@ -281,9 +383,7 @@ async fn spawn_shell_worker(
         }
 
         let _ = output_tx.send(b"\r\n[connection closed]\r\n".to_vec());
-        let _ = handle
-            .disconnect(Disconnect::ByApplication, "", "en")
-            .await;
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
     });
 
     registry().lock().await.insert(
@@ -301,9 +401,7 @@ async fn spawn_shell_worker(
 /// Take the output receiver for a session. Returns `None` if the session
 /// doesn't exist or another caller has already taken it. Intended to be
 /// called once, by the FFI bridge layer, immediately after `open_shell_pubkey`.
-pub async fn take_output_receiver(
-    session_id: u64,
-) -> Option<mpsc::UnboundedReceiver<Vec<u8>>> {
+pub async fn take_output_receiver(session_id: u64) -> Option<mpsc::UnboundedReceiver<Vec<u8>>> {
     let guard = registry().lock().await;
     let session = guard.get(&session_id)?;
     let mut rx_guard = session.output_rx.lock().await;
@@ -337,7 +435,7 @@ pub async fn shell_resize(session_id: u64, cols: u32, rows: u32) -> Result<(), S
     Ok(())
 }
 
-/// Close a shell session. Idempotent — closing an unknown id is a no-op.
+/// Close a shell session. Idempotent ??closing an unknown id is a no-op.
 pub async fn shell_close(session_id: u64) -> Result<(), SshError> {
     let mut guard = registry().lock().await;
     if let Some(session) = guard.remove(&session_id) {
@@ -354,7 +452,7 @@ pub async fn shell_close(session_id: u64) -> Result<(), SshError> {
 
 /// Returns an authenticated SSH session, optionally going through a jump
 /// host. `jump_handle` (the second tuple element) must be kept alive for
-/// the session's lifetime when present — dropping it tears down the proxy.
+/// the session's lifetime when present ??dropping it tears down the proxy.
 pub async fn open_session_pubkey(
     host: String,
     port: u16,
@@ -370,17 +468,90 @@ pub async fn open_session_pubkey(
     });
     let (mut handle, jump_handle) = match jump {
         Some(j) => {
-            let (jh, th) = connect_via_jump(j, host, port, config).await?;
+            let (jh, th) = connect_via_jump(j, host, port, config, None).await?;
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
             None,
         ),
     };
-    if !handle.authenticate_publickey(username, Arc::new(key_pair)).await? {
+    if !handle
+        .authenticate_publickey(username, Arc::new(key_pair))
+        .await?
+    {
         return Err(SshError::AuthFailed);
     }
+    Ok((handle, jump_handle))
+}
+
+pub async fn open_session_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    jump: Option<JumpParams>,
+) -> Result<(Handle<TofuHandler>, Option<Handle<TofuHandler>>), SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host, port, config, None).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
+            None,
+        ),
+    };
+    let authed = handle
+        .authenticate_password(username.clone(), password.clone())
+        .await?;
+    if !authed {
+        authenticate_keyboard_interactive(&mut handle, &username, vec![password]).await?;
+    }
+    Ok((handle, jump_handle))
+}
+
+pub async fn open_session_keyboard_interactive(
+    host: String,
+    port: u16,
+    username: String,
+    responses: Vec<String>,
+    jump: Option<JumpParams>,
+) -> Result<(Handle<TofuHandler>, Option<Handle<TofuHandler>>), SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host, port, config, None).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
+            None,
+        ),
+    };
+    authenticate_keyboard_interactive(&mut handle, &username, responses).await?;
     Ok((handle, jump_handle))
 }
 
@@ -396,11 +567,16 @@ pub async fn open_session_agent(
     });
     let (mut handle, jump_handle) = match jump {
         Some(j) => {
-            let (jh, th) = connect_via_jump(j, host, port, config).await?;
+            let (jh, th) = connect_via_jump(j, host, port, config, None).await?;
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
             None,
         ),
     };
@@ -408,17 +584,128 @@ pub async fn open_session_agent(
     Ok((handle, jump_handle))
 }
 
+pub async fn open_session_pubkey_for_remote_forward(
+    host: String,
+    port: u16,
+    username: String,
+    private_key_path: PathBuf,
+    passphrase: Option<String>,
+    jump: Option<JumpParams>,
+    local_host: String,
+    local_port: u16,
+) -> Result<(Handle<TofuHandler>, Option<Handle<TofuHandler>>), SshError> {
+    let key_pair = russh::keys::load_secret_key(&private_key_path, passphrase.as_deref())?;
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+    let forward_target = Some((local_host.clone(), local_port));
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config, forward_target).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new_remote_forward(host.clone(), port, local_host, local_port),
+            )
+            .await?,
+            None,
+        ),
+    };
+    if !handle
+        .authenticate_publickey(username, Arc::new(key_pair))
+        .await?
+    {
+        return Err(SshError::AuthFailed);
+    }
+    Ok((handle, jump_handle))
+}
+
+pub async fn open_session_agent_for_remote_forward(
+    host: String,
+    port: u16,
+    username: String,
+    jump: Option<JumpParams>,
+    local_host: String,
+    local_port: u16,
+) -> Result<(Handle<TofuHandler>, Option<Handle<TofuHandler>>), SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+    let forward_target = Some((local_host.clone(), local_port));
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config, forward_target).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new_remote_forward(host.clone(), port, local_host, local_port),
+            )
+            .await?,
+            None,
+        ),
+    };
+    authenticate_via_agent(&mut handle, &username).await?;
+    Ok((handle, jump_handle))
+}
+
+pub async fn open_session_password_for_remote_forward(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    jump: Option<JumpParams>,
+    local_host: String,
+    local_port: u16,
+) -> Result<(Handle<TofuHandler>, Option<Handle<TofuHandler>>), SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    });
+    let forward_target = Some((local_host.clone(), local_port));
+    let (mut handle, jump_handle) = match jump {
+        Some(j) => {
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config, forward_target).await?;
+            (th, Some(jh))
+        }
+        None => (
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new_remote_forward(host.clone(), port, local_host, local_port),
+            )
+            .await?,
+            None,
+        ),
+    };
+    let authed = handle
+        .authenticate_password(username.clone(), password.clone())
+        .await?;
+    if !authed {
+        authenticate_keyboard_interactive(&mut handle, &username, vec![password]).await?;
+    }
+    Ok((handle, jump_handle))
+}
+
 // Re-export for downstream crates that want to plug into the same handler.
 pub type SshHandle = Handle<TofuHandler>;
 
 // ---------------------------------------------------------------------------
-// Phase 5 — local port forwarding (-L)
+// Phase 5 ??local port forwarding (-L)
 // ---------------------------------------------------------------------------
 
 /// One active local-forward listener. Cancelling its task tears down the
 /// TcpListener and drops the SSH session held in the worker.
 pub struct ForwardInfo {
     pub id: u64,
+    pub kind: String,
     pub local_addr: String,
     pub local_port: u16,
     pub remote_host: String,
@@ -427,7 +714,11 @@ pub struct ForwardInfo {
 
 struct ActiveForward {
     info: ForwardInfo,
-    cancel: tokio::sync::oneshot::Sender<()>,
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
+    remote_handle: Option<SshHandle>,
+    remote_bind_addr: String,
+    remote_bind_port: u16,
+    _jump_handle: Option<SshHandle>,
 }
 
 fn forward_registry() -> &'static Mutex<HashMap<u64, ActiveForward>> {
@@ -451,8 +742,7 @@ pub async fn start_local_forward(
     remote_host: String,
     remote_port: u16,
 ) -> Result<u64, SshError> {
-    let listener = tokio::net::TcpListener::bind(format!("{local_addr}:{local_port}"))
-        .await?;
+    let listener = tokio::net::TcpListener::bind(format!("{local_addr}:{local_port}")).await?;
     let actual_port = listener.local_addr()?.port();
     let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
     let id = next_forward_id();
@@ -502,15 +792,210 @@ pub async fn start_local_forward(
         ActiveForward {
             info: ForwardInfo {
                 id,
+                kind: "local".to_string(),
                 local_addr,
                 local_port: actual_port,
                 remote_host,
                 remote_port,
             },
-            cancel: cancel_tx,
+            cancel: Some(cancel_tx),
+            remote_handle: None,
+            remote_bind_addr: String::new(),
+            remote_bind_port: 0,
+            _jump_handle: None,
         },
     );
     Ok(id)
+}
+
+pub async fn start_socks_forward(
+    handle: SshHandle,
+    jump_handle: Option<SshHandle>,
+    local_addr: String,
+    local_port: u16,
+) -> Result<u64, SshError> {
+    let listener = tokio::net::TcpListener::bind(format!("{local_addr}:{local_port}")).await?;
+    let actual_port = listener.local_addr()?.port();
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let id = next_forward_id();
+    let shared_handle = Arc::new(handle);
+
+    tokio::spawn(async move {
+        let _keep_jump = jump_handle;
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => break,
+                accept = listener.accept() => {
+                    let (mut stream, peer) = match accept {
+                        Ok(v) => v,
+                        Err(_) => break,
+                    };
+                    let h = shared_handle.clone();
+                    tokio::spawn(async move {
+                        let target = match read_socks5_connect(&mut stream).await {
+                            Ok(v) => v,
+                            Err(_) => return,
+                        };
+                        let channel = match h
+                            .channel_open_direct_tcpip(
+                                target.0.clone(),
+                                target.1 as u32,
+                                peer.ip().to_string(),
+                                peer.port() as u32,
+                            )
+                            .await
+                        {
+                            Ok(c) => c,
+                            Err(_) => {
+                                let _ = write_socks5_reply(&mut stream, 0x05, "0.0.0.0", 0).await;
+                                return;
+                            }
+                        };
+                        if write_socks5_reply(&mut stream, 0x00, "0.0.0.0", 0).await.is_err() {
+                            return;
+                        }
+                        let mut ch_stream = channel.into_stream();
+                        let _ = tokio::io::copy_bidirectional(&mut stream, &mut ch_stream).await;
+                    });
+                }
+            }
+        }
+    });
+
+    forward_registry().lock().await.insert(
+        id,
+        ActiveForward {
+            info: ForwardInfo {
+                id,
+                kind: "socks".to_string(),
+                local_addr,
+                local_port: actual_port,
+                remote_host: "SOCKS5".to_string(),
+                remote_port: 0,
+            },
+            cancel: Some(cancel_tx),
+            remote_handle: None,
+            remote_bind_addr: String::new(),
+            remote_bind_port: 0,
+            _jump_handle: None,
+        },
+    );
+    Ok(id)
+}
+
+pub async fn start_remote_forward(
+    mut handle: SshHandle,
+    jump_handle: Option<SshHandle>,
+    remote_addr: String,
+    remote_port: u16,
+    local_host: String,
+    local_port: u16,
+) -> Result<u64, SshError> {
+    let returned_port = handle
+        .tcpip_forward(remote_addr.clone(), remote_port as u32)
+        .await?;
+    let actual_port = if remote_port == 0 {
+        returned_port as u16
+    } else {
+        remote_port
+    };
+    let id = next_forward_id();
+    forward_registry().lock().await.insert(
+        id,
+        ActiveForward {
+            info: ForwardInfo {
+                id,
+                kind: "remote".to_string(),
+                local_addr: remote_addr.clone(),
+                local_port: actual_port,
+                remote_host: local_host,
+                remote_port: local_port,
+            },
+            cancel: None,
+            remote_handle: Some(handle),
+            remote_bind_addr: remote_addr,
+            remote_bind_port: actual_port,
+            _jump_handle: jump_handle,
+        },
+    );
+    Ok(id)
+}
+
+async fn read_socks5_connect(
+    stream: &mut tokio::net::TcpStream,
+) -> Result<(String, u16), SshError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut header = [0u8; 2];
+    stream.read_exact(&mut header).await?;
+    if header[0] != 0x05 || header[1] == 0 {
+        return Err(
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid socks greeting").into(),
+        );
+    }
+    let mut methods = vec![0u8; header[1] as usize];
+    stream.read_exact(&mut methods).await?;
+    stream.write_all(&[0x05, 0x00]).await?;
+
+    let mut req = [0u8; 4];
+    stream.read_exact(&mut req).await?;
+    if req[0] != 0x05 || req[1] != 0x01 || req[2] != 0x00 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unsupported socks command",
+        )
+        .into());
+    }
+    let host = match req[3] {
+        0x01 => {
+            let mut addr = [0u8; 4];
+            stream.read_exact(&mut addr).await?;
+            std::net::Ipv4Addr::from(addr).to_string()
+        }
+        0x03 => {
+            let mut len = [0u8; 1];
+            stream.read_exact(&mut len).await?;
+            let mut name = vec![0u8; len[0] as usize];
+            stream.read_exact(&mut name).await?;
+            String::from_utf8(name).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid socks host")
+            })?
+        }
+        0x04 => {
+            let mut addr = [0u8; 16];
+            stream.read_exact(&mut addr).await?;
+            std::net::Ipv6Addr::from(addr).to_string()
+        }
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unsupported socks address",
+            )
+            .into());
+        }
+    };
+    let mut port = [0u8; 2];
+    stream.read_exact(&mut port).await?;
+    Ok((host, u16::from_be_bytes(port)))
+}
+
+async fn write_socks5_reply(
+    stream: &mut tokio::net::TcpStream,
+    status: u8,
+    bind_addr: &str,
+    bind_port: u16,
+) -> Result<(), SshError> {
+    use tokio::io::AsyncWriteExt;
+
+    let addr = bind_addr
+        .parse::<std::net::Ipv4Addr>()
+        .unwrap_or(std::net::Ipv4Addr::UNSPECIFIED)
+        .octets();
+    let mut reply = vec![0x05, status, 0x00, 0x01];
+    reply.extend_from_slice(&addr);
+    reply.extend_from_slice(&bind_port.to_be_bytes());
+    stream.write_all(&reply).await?;
+    Ok(())
 }
 
 pub async fn list_forwards() -> Vec<ForwardInfo> {
@@ -519,6 +1004,7 @@ pub async fn list_forwards() -> Vec<ForwardInfo> {
         .values()
         .map(|f| ForwardInfo {
             id: f.info.id,
+            kind: f.info.kind.clone(),
             local_addr: f.info.local_addr.clone(),
             local_port: f.info.local_port,
             remote_host: f.info.remote_host.clone(),
@@ -528,19 +1014,27 @@ pub async fn list_forwards() -> Vec<ForwardInfo> {
 }
 
 pub async fn stop_forward(id: u64) -> Result<(), SshError> {
-    if let Some(f) = forward_registry().lock().await.remove(&id) {
-        let _ = f.cancel.send(());
+    if let Some(mut f) = forward_registry().lock().await.remove(&id) {
+        if let Some(cancel) = f.cancel.take() {
+            let _ = cancel.send(());
+        }
+        if let Some(handle) = f.remote_handle.take() {
+            let _ = handle
+                .cancel_tcpip_forward(f.remote_bind_addr, f.remote_bind_port as u32)
+                .await;
+            let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+        }
     }
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8c — Telnet transport (raw TCP, no IAC negotiation)
+// Phase 8c ??Telnet transport (raw TCP, no IAC negotiation)
 // ---------------------------------------------------------------------------
 
 /// Open a "shell" backed by a plain TCP socket (Telnet-style). Most modern
 /// Telnet servers tolerate raw TCP and run in line/echo mode of their own
-/// accord; full IAC option negotiation is future work.
+/// accord. Full IAC option negotiation is outside this raw TCP transport.
 pub async fn open_shell_telnet(
     host: String,
     port: u16,
@@ -555,7 +1049,7 @@ pub async fn open_shell_telnet(
     let (write_tx, mut write_rx) = mpsc::unbounded_channel::<ShellCommand>();
     let id = next_session_id();
 
-    // Reader task — pumps bytes from the socket into output_tx.
+    // Reader task ??pumps bytes from the socket into output_tx.
     let read_tx = output_tx.clone();
     let read_task = tokio::spawn(async move {
         let mut buf = vec![0u8; 4096];
@@ -572,7 +1066,7 @@ pub async fn open_shell_telnet(
         }
     });
 
-    // Writer / control task — drains write_rx into the socket.
+    // Writer / control task ??drains write_rx into the socket.
     let task = tokio::spawn(async move {
         while let Some(cmd) = write_rx.recv().await {
             match cmd {
@@ -604,7 +1098,7 @@ pub async fn open_shell_telnet(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4.0 — agent-based auth
+// Phase 4.0 ??agent-based auth
 // ---------------------------------------------------------------------------
 
 /// Open an interactive shell using the local SSH agent for authentication.
@@ -629,17 +1123,102 @@ pub async fn open_shell_agent(
 
     let (mut handle, jump_handle) = match jump {
         Some(j) => {
-            let (jh, th) = connect_via_jump(j, host.clone(), port, config).await?;
+            let (jh, th) = connect_via_jump(j, host.clone(), port, config, None).await?;
             (th, Some(jh))
         }
         None => (
-            client::connect(config, (host.as_str(), port), TofuHandler::new(host.clone(), port)).await?,
+            client::connect(
+                config,
+                (host.as_str(), port),
+                TofuHandler::new(host.clone(), port),
+            )
+            .await?,
             None,
         ),
     };
 
     authenticate_via_agent(&mut handle, &username).await?;
     spawn_shell_worker(handle, jump_handle, cols, rows).await
+}
+
+/// Connect just far enough to inspect the server host-key fingerprint.
+///
+/// The returned check is non-mutating: new keys are not trusted here. Call
+/// `tindra_store::trust_host_key` after the user explicitly approves a `new`
+/// fingerprint.
+pub async fn probe_host_key(
+    host: String,
+    port: u16,
+) -> Result<tindra_store::HostKeyCheck, SshError> {
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(30)),
+        ..Default::default()
+    });
+    let seen = Arc::new(Mutex::new(None));
+    let handler = ProbeHostKeyHandler {
+        fingerprint: seen.clone(),
+    };
+    let connect = client::connect(config, (host.as_str(), port), handler).await;
+    if let Ok(handle) = connect {
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+    let fingerprint = seen
+        .lock()
+        .await
+        .clone()
+        .ok_or(SshError::HostKeyUnavailable)?;
+    tindra_store::check_host_key(host, port, fingerprint)
+        .await
+        .map_err(|e| SshError::HostKeyStore(e.to_string()))
+}
+
+pub async fn probe_host_key_via_jump(
+    jump: JumpParams,
+    target_host: String,
+    target_port: u16,
+) -> Result<tindra_store::HostKeyCheck, SshError> {
+    let jump_key =
+        russh::keys::load_secret_key(&jump.private_key_path, jump.passphrase.as_deref())?;
+    let config = Arc::new(client::Config {
+        inactivity_timeout: Some(Duration::from_secs(30)),
+        ..Default::default()
+    });
+    let mut jump_handle: Handle<TofuHandler> = client::connect(
+        config.clone(),
+        (jump.host.as_str(), jump.port),
+        TofuHandler::new(jump.host.clone(), jump.port),
+    )
+    .await?;
+    let authed = jump_handle
+        .authenticate_publickey(jump.username, Arc::new(jump_key))
+        .await?;
+    if !authed {
+        return Err(SshError::AuthFailed);
+    }
+
+    let channel = jump_handle
+        .channel_open_direct_tcpip(target_host.clone(), target_port as u32, "127.0.0.1", 0)
+        .await?;
+    let stream = channel.into_stream();
+    let seen = Arc::new(Mutex::new(None));
+    let handler = ProbeHostKeyHandler {
+        fingerprint: seen.clone(),
+    };
+    let connect = client::connect_stream(config, stream, handler).await;
+    if let Ok(handle) = connect {
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+    let _ = jump_handle
+        .disconnect(Disconnect::ByApplication, "", "en")
+        .await;
+    let fingerprint = seen
+        .lock()
+        .await
+        .clone()
+        .ok_or(SshError::HostKeyUnavailable)?;
+    tindra_store::check_host_key(target_host, target_port, fingerprint)
+        .await
+        .map_err(|e| SshError::HostKeyStore(e.to_string()))
 }
 
 /// Walks every identity the local agent advertises and tries each one against
@@ -658,12 +1237,18 @@ async fn authenticate_via_agent(
         let mut stream = None;
         for _ in 0..5 {
             match ClientOptions::new().open(r"\\.\pipe\openssh-ssh-agent") {
-                Ok(s) => { stream = Some(s); break; }
+                Ok(s) => {
+                    stream = Some(s);
+                    break;
+                }
                 Err(e) if e.raw_os_error() == Some(231) => {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     last_err = Some(e);
                 }
-                Err(e) => { last_err = Some(e); break; }
+                Err(e) => {
+                    last_err = Some(e);
+                    break;
+                }
             }
         }
         let stream = stream.ok_or_else(|| {
@@ -703,6 +1288,41 @@ async fn authenticate_via_agent(
     Err(SshError::AuthFailed)
 }
 
+async fn authenticate_keyboard_interactive(
+    handle: &mut Handle<TofuHandler>,
+    username: &str,
+    configured_responses: Vec<String>,
+) -> Result<(), SshError> {
+    let mut next_response = 0usize;
+    let mut response = handle
+        .authenticate_keyboard_interactive_start(username.to_string(), Some(String::new()))
+        .await?;
+
+    loop {
+        match response {
+            KeyboardInteractiveAuthResponse::Success => return Ok(()),
+            KeyboardInteractiveAuthResponse::Failure => return Err(SshError::AuthFailed),
+            KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
+                let mut answers = Vec::with_capacity(prompts.len());
+                for prompt in prompts {
+                    let answer = configured_responses
+                        .get(next_response)
+                        .or_else(|| configured_responses.last())
+                        .cloned()
+                        .ok_or_else(|| {
+                            SshError::KeyboardInteractiveMissingResponse(prompt.prompt.clone())
+                        })?;
+                    next_response += 1;
+                    answers.push(answer);
+                }
+                response = handle
+                    .authenticate_keyboard_interactive_respond(answers)
+                    .await?;
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Server-key handler
 // ---------------------------------------------------------------------------
@@ -715,11 +1335,29 @@ async fn authenticate_via_agent(
 pub struct TofuHandler {
     host: String,
     port: u16,
+    remote_forward_target: Option<(String, u16)>,
 }
 
 impl TofuHandler {
     pub fn new(host: String, port: u16) -> Self {
-        Self { host, port }
+        Self {
+            host,
+            port,
+            remote_forward_target: None,
+        }
+    }
+
+    pub fn new_remote_forward(
+        host: String,
+        port: u16,
+        local_host: String,
+        local_port: u16,
+    ) -> Self {
+        Self {
+            host,
+            port,
+            remote_forward_target: Some((local_host, local_port)),
+        }
     }
 }
 
@@ -732,12 +1370,7 @@ impl client::Handler for TofuHandler {
         server_public_key: &russh::keys::key::PublicKey,
     ) -> Result<bool, Self::Error> {
         let fingerprint = server_public_key.fingerprint();
-        match tindra_store::verify_or_trust_host_key(
-            self.host.clone(),
-            self.port,
-            fingerprint,
-        )
-        .await
+        match tindra_store::verify_trusted_host_key(self.host.clone(), self.port, fingerprint).await
         {
             Ok(()) => Ok(true),
             Err(e) => {
@@ -745,5 +1378,46 @@ impl client::Handler for TofuHandler {
                 Ok(false)
             }
         }
+    }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<client::Msg>,
+        _connected_address: &str,
+        _connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some((local_host, local_port)) = self.remote_forward_target.clone() else {
+            return Ok(());
+        };
+        tokio::spawn(async move {
+            let mut local_stream =
+                match tokio::net::TcpStream::connect((local_host.as_str(), local_port)).await {
+                    Ok(stream) => stream,
+                    Err(_) => return,
+                };
+            let mut channel_stream = channel.into_stream();
+            let _ = tokio::io::copy_bidirectional(&mut local_stream, &mut channel_stream).await;
+        });
+        Ok(())
+    }
+}
+
+struct ProbeHostKeyHandler {
+    fingerprint: Arc<Mutex<Option<String>>>,
+}
+
+#[async_trait]
+impl client::Handler for ProbeHostKeyHandler {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &russh::keys::key::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        *self.fingerprint.lock().await = Some(server_public_key.fingerprint());
+        Ok(false)
     }
 }

@@ -40,8 +40,11 @@ dependencies:
   hotkey_manager: ^0.2.3
   window_manager: ^0.4.3
   google_fonts: ^6.2.0
+  tindra_shared_ui:
+    path: ../shared_ui
   rust_lib_tindra:
     path: rust_builder
+  desktop_multi_window: ^0.3.0
 
 dev_dependencies:
   flutter_test:

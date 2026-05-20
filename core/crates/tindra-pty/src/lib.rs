@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
@@ -27,7 +28,14 @@ struct ActiveLocalShell {
     writer: Arc<StdMutex<Box<dyn Write + Send>>>,
     output_rx: Mutex<Option<mpsc::UnboundedReceiver<Vec<u8>>>>,
     _reader_thread: std::thread::JoinHandle<()>,
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LocalShellOptions {
+    pub shell: Option<String>,
+    pub cwd: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
 }
 
 fn registry() -> &'static Mutex<HashMap<u64, ActiveLocalShell>> {
@@ -57,7 +65,11 @@ fn default_shell() -> String {
 #[cfg(windows)]
 fn configure_windows_shell(cmd: &mut CommandBuilder, shell: &str) {
     let lower = shell.to_lowercase();
-    if lower.ends_with("powershell.exe") || lower.ends_with("pwsh.exe") || lower == "powershell" || lower == "pwsh" {
+    if lower.ends_with("powershell.exe")
+        || lower.ends_with("pwsh.exe")
+        || lower == "powershell"
+        || lower == "pwsh"
+    {
         cmd.arg("-NoLogo");
         // Make native PowerShell commands and common child tools prefer UTF-8.
         // This is especially important for Korean paths/output on Windows.
@@ -82,7 +94,27 @@ pub async fn open_local_shell(
     cols: u32,
     rows: u32,
 ) -> Result<u64, PtyError> {
-    let shell = shell.filter(|s| !s.trim().is_empty()).unwrap_or_else(default_shell);
+    open_local_shell_with_options(
+        LocalShellOptions {
+            shell,
+            cwd: None,
+            env: Vec::new(),
+        },
+        cols,
+        rows,
+    )
+    .await
+}
+
+pub async fn open_local_shell_with_options(
+    options: LocalShellOptions,
+    cols: u32,
+    rows: u32,
+) -> Result<u64, PtyError> {
+    let shell = options
+        .shell
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(default_shell);
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -95,6 +127,14 @@ pub async fn open_local_shell(
 
     let mut cmd = CommandBuilder::new(shell.clone());
     configure_windows_shell(&mut cmd, &shell);
+    if let Some(cwd) = options.cwd {
+        cmd.cwd(cwd);
+    }
+    for (name, value) in options.env {
+        if !name.trim().is_empty() {
+            cmd.env(name, value);
+        }
+    }
     let child = pair
         .slave
         .spawn_command(cmd)
@@ -136,15 +176,13 @@ pub async fn open_local_shell(
             writer,
             output_rx: Mutex::new(Some(output_rx)),
             _reader_thread: reader_thread,
-            _child: child,
+            child,
         },
     );
     Ok(id)
 }
 
-pub async fn take_output_receiver(
-    session_id: u64,
-) -> Option<mpsc::UnboundedReceiver<Vec<u8>>> {
+pub async fn take_output_receiver(session_id: u64) -> Option<mpsc::UnboundedReceiver<Vec<u8>>> {
     let guard = registry().lock().await;
     let session = guard.get(&session_id)?;
     let mut rx_guard = session.output_rx.lock().await;
@@ -153,7 +191,9 @@ pub async fn take_output_receiver(
 
 pub async fn local_shell_write(session_id: u64, data: Vec<u8>) -> Result<(), PtyError> {
     let guard = registry().lock().await;
-    let session = guard.get(&session_id).ok_or(PtyError::NotFound(session_id))?;
+    let session = guard
+        .get(&session_id)
+        .ok_or(PtyError::NotFound(session_id))?;
     let mut writer = session
         .writer
         .lock()
@@ -165,7 +205,9 @@ pub async fn local_shell_write(session_id: u64, data: Vec<u8>) -> Result<(), Pty
 
 pub async fn local_shell_resize(session_id: u64, cols: u32, rows: u32) -> Result<(), PtyError> {
     let guard = registry().lock().await;
-    let session = guard.get(&session_id).ok_or(PtyError::NotFound(session_id))?;
+    let session = guard
+        .get(&session_id)
+        .ok_or(PtyError::NotFound(session_id))?;
     session
         .master
         .resize(PtySize {
@@ -179,7 +221,9 @@ pub async fn local_shell_resize(session_id: u64, cols: u32, rows: u32) -> Result
 }
 
 pub async fn local_shell_close(session_id: u64) -> Result<(), PtyError> {
-    registry().lock().await.remove(&session_id);
+    if let Some(mut session) = registry().lock().await.remove(&session_id) {
+        let _ = session.child.kill();
+    }
     Ok(())
 }
 

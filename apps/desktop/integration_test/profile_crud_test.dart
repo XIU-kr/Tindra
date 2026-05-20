@@ -26,8 +26,11 @@ void main() {
     for (final p in originalProfiles) {
       await rust.deleteProfile(id: p.id);
     }
-    expect(await rust.listProfiles(), isEmpty,
-        reason: 'pre-test wipe should have emptied the store');
+    expect(
+      await rust.listProfiles(),
+      isEmpty,
+      reason: 'pre-test wipe should have emptied the store',
+    );
   });
 
   tearDownAll(() async {
@@ -61,54 +64,65 @@ void main() {
     expect(created.id, isNotEmpty);
     expect(created.name, 'crud-test-1');
 
-    expect(storeFile.existsSync(), isTrue, reason: 'JSON file should be written');
-    final raw = jsonDecode(storeFile.readAsStringSync()) as Map<String, dynamic>;
+    expect(
+      storeFile.existsSync(),
+      isTrue,
+      reason: 'JSON file should be written',
+    );
+    final raw =
+        jsonDecode(storeFile.readAsStringSync()) as Map<String, dynamic>;
     final profiles = (raw['profiles'] as List).cast<Map<String, dynamic>>();
     expect(profiles, hasLength(1));
     expect(profiles.first['id'], created.id);
     expect(profiles.first['notes'], 'integration test');
   });
 
-  test('list returns all profiles, sorted by name (case-insensitive)',
-      () async {
-    await rust.upsertProfile(
-      profile: const rust.Profile(
-        id: '',
-        name: 'zeta',
-        host: 'h2',
-        port: 22,
-        username: 'u',
-        privateKeyPath: 'k',
-        notes: '',
-        authMethod: 'key',
-        jumpHost: '',
-        jumpPort: 22,
-        jumpUsername: '',
-        jumpPrivateKeyPath: '',
-        transport: 'ssh',
-      ),
-    );
-    await rust.upsertProfile(
-      profile: const rust.Profile(
-        id: '',
-        name: 'alpha',
-        host: 'h3',
-        port: 22,
-        username: 'u',
-        privateKeyPath: 'k',
-        notes: '',
-        authMethod: 'key',
-        jumpHost: '',
-        jumpPort: 22,
-        jumpUsername: '',
-        jumpPrivateKeyPath: '',
-        transport: 'ssh',
-      ),
-    );
+  test(
+    'list returns all profiles, sorted by name (case-insensitive)',
+    () async {
+      await rust.upsertProfile(
+        profile: const rust.Profile(
+          id: '',
+          name: 'zeta',
+          host: 'h2',
+          port: 22,
+          username: 'u',
+          privateKeyPath: 'k',
+          notes: '',
+          authMethod: 'key',
+          jumpHost: '',
+          jumpPort: 22,
+          jumpUsername: '',
+          jumpPrivateKeyPath: '',
+          transport: 'ssh',
+        ),
+      );
+      await rust.upsertProfile(
+        profile: const rust.Profile(
+          id: '',
+          name: 'alpha',
+          host: 'h3',
+          port: 22,
+          username: 'u',
+          privateKeyPath: 'k',
+          notes: '',
+          authMethod: 'key',
+          jumpHost: '',
+          jumpPort: 22,
+          jumpUsername: '',
+          jumpPrivateKeyPath: '',
+          transport: 'ssh',
+        ),
+      );
 
-    final list = await rust.listProfiles();
-    expect(list.map((p) => p.name).toList(), ['alpha', 'crud-test-1', 'zeta']);
-  });
+      final list = await rust.listProfiles();
+      expect(list.map((p) => p.name).toList(), [
+        'alpha',
+        'crud-test-1',
+        'zeta',
+      ]);
+    },
+  );
 
   test('upsert with existing id overwrites in place', () async {
     final list = await rust.listProfiles();
@@ -152,7 +166,8 @@ void main() {
     expect(after, hasLength(before.length - 1));
     expect(after.any((p) => p.id == victim.id), isFalse);
 
-    final raw = jsonDecode(storeFile.readAsStringSync()) as Map<String, dynamic>;
+    final raw =
+        jsonDecode(storeFile.readAsStringSync()) as Map<String, dynamic>;
     final ids = (raw['profiles'] as List)
         .cast<Map<String, dynamic>>()
         .map((m) => m['id'] as String)
@@ -167,16 +182,22 @@ void main() {
     expect(after.length, before.length);
   });
 
-  test('disk and in-memory views agree (file round-trip persistence)',
-      () async {
-    final list = await rust.listProfiles();
-    expect(list.map((p) => p.name), containsAll(['alpha-renamed', 'crud-test-1']));
-    final raw = jsonDecode(storeFile.readAsStringSync()) as Map<String, dynamic>;
-    final namesOnDisk = (raw['profiles'] as List)
-        .cast<Map<String, dynamic>>()
-        .map((m) => m['name'] as String)
-        .toSet();
-    final namesInMem = list.map((p) => p.name).toSet();
-    expect(namesOnDisk, namesInMem);
-  });
+  test(
+    'disk and in-memory views agree (file round-trip persistence)',
+    () async {
+      final list = await rust.listProfiles();
+      expect(
+        list.map((p) => p.name),
+        containsAll(['alpha-renamed', 'crud-test-1']),
+      );
+      final raw =
+          jsonDecode(storeFile.readAsStringSync()) as Map<String, dynamic>;
+      final namesOnDisk = (raw['profiles'] as List)
+          .cast<Map<String, dynamic>>()
+          .map((m) => m['name'] as String)
+          .toSet();
+      final namesInMem = list.map((p) => p.name).toSet();
+      expect(namesOnDisk, namesInMem);
+    },
+  );
 }

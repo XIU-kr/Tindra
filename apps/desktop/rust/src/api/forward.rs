@@ -1,4 +1,4 @@
-// FFI surface for Phase 5 port forwarding (local -L only for the MVP).
+// FFI surface for SSH port forwarding: local (-L), remote (-R), and dynamic SOCKS (-D).
 
 use std::path::PathBuf;
 
@@ -7,6 +7,7 @@ use crate::api::ssh::{jump_to_core_pub, JumpHost};
 #[derive(Debug, Clone)]
 pub struct PortForward {
     pub id: u64,
+    pub kind: String,
     pub local_addr: String,
     pub local_port: u16,
     pub remote_host: String,
@@ -17,12 +18,235 @@ impl From<tindra_core::ssh::ForwardInfo> for PortForward {
     fn from(f: tindra_core::ssh::ForwardInfo) -> Self {
         PortForward {
             id: f.id,
+            kind: f.kind,
             local_addr: f.local_addr,
             local_port: f.local_port,
             remote_host: f.remote_host,
             remote_port: f.remote_port,
         }
     }
+}
+
+pub async fn open_socks_forward_pubkey(
+    host: String,
+    port: u16,
+    username: String,
+    private_key_path: String,
+    passphrase: Option<String>,
+    jump: JumpHost,
+    local_addr: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_pubkey(
+        host,
+        port,
+        username,
+        PathBuf::from(private_key_path),
+        passphrase,
+        jump_to_core_pub(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_socks_forward(handle, jump_handle, local_addr, local_port)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn open_socks_forward_agent(
+    host: String,
+    port: u16,
+    username: String,
+    jump: JumpHost,
+    local_addr: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) =
+        tindra_core::ssh::open_session_agent(host, port, username, jump_to_core_pub(jump))
+            .await
+            .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_socks_forward(handle, jump_handle, local_addr, local_port)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn open_socks_forward_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    jump: JumpHost,
+    local_addr: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_password(
+        host,
+        port,
+        username,
+        password,
+        jump_to_core_pub(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_socks_forward(handle, jump_handle, local_addr, local_port)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn open_socks_forward_keyboard_interactive(
+    host: String,
+    port: u16,
+    username: String,
+    responses: Vec<String>,
+    jump: JumpHost,
+    local_addr: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_keyboard_interactive(
+        host,
+        port,
+        username,
+        responses,
+        jump_to_core_pub(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_socks_forward(handle, jump_handle, local_addr, local_port)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn open_remote_forward_pubkey(
+    host: String,
+    port: u16,
+    username: String,
+    private_key_path: String,
+    passphrase: Option<String>,
+    jump: JumpHost,
+    remote_addr: String,
+    remote_port: u16,
+    local_host: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_pubkey_for_remote_forward(
+        host,
+        port,
+        username,
+        PathBuf::from(private_key_path),
+        passphrase,
+        jump_to_core_pub(jump),
+        local_host.clone(),
+        local_port,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_remote_forward(
+        handle,
+        jump_handle,
+        remote_addr,
+        remote_port,
+        local_host,
+        local_port,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+pub async fn open_remote_forward_agent(
+    host: String,
+    port: u16,
+    username: String,
+    jump: JumpHost,
+    remote_addr: String,
+    remote_port: u16,
+    local_host: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_agent_for_remote_forward(
+        host,
+        port,
+        username,
+        jump_to_core_pub(jump),
+        local_host.clone(),
+        local_port,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_remote_forward(
+        handle,
+        jump_handle,
+        remote_addr,
+        remote_port,
+        local_host,
+        local_port,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+pub async fn open_remote_forward_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    jump: JumpHost,
+    remote_addr: String,
+    remote_port: u16,
+    local_host: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_password_for_remote_forward(
+        host,
+        port,
+        username,
+        password,
+        jump_to_core_pub(jump),
+        local_host.clone(),
+        local_port,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_remote_forward(
+        handle,
+        jump_handle,
+        remote_addr,
+        remote_port,
+        local_host,
+        local_port,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+pub async fn open_remote_forward_keyboard_interactive(
+    host: String,
+    port: u16,
+    username: String,
+    responses: Vec<String>,
+    jump: JumpHost,
+    remote_addr: String,
+    remote_port: u16,
+    local_host: String,
+    local_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_keyboard_interactive(
+        host,
+        port,
+        username,
+        responses,
+        jump_to_core_pub(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_remote_forward(
+        handle,
+        jump_handle,
+        remote_addr,
+        remote_port,
+        local_host,
+        local_port,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 pub async fn open_local_forward_pubkey(
@@ -73,6 +297,70 @@ pub async fn open_local_forward_agent(
         tindra_core::ssh::open_session_agent(host, port, username, jump_to_core_pub(jump))
             .await
             .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_local_forward(
+        handle,
+        jump_handle,
+        local_addr,
+        local_port,
+        remote_host,
+        remote_port,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+pub async fn open_local_forward_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    jump: JumpHost,
+    local_addr: String,
+    local_port: u16,
+    remote_host: String,
+    remote_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_password(
+        host,
+        port,
+        username,
+        password,
+        jump_to_core_pub(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    tindra_core::ssh::start_local_forward(
+        handle,
+        jump_handle,
+        local_addr,
+        local_port,
+        remote_host,
+        remote_port,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+pub async fn open_local_forward_keyboard_interactive(
+    host: String,
+    port: u16,
+    username: String,
+    responses: Vec<String>,
+    jump: JumpHost,
+    local_addr: String,
+    local_port: u16,
+    remote_host: String,
+    remote_port: u16,
+) -> Result<u64, String> {
+    let (handle, jump_handle) = tindra_core::ssh::open_session_keyboard_interactive(
+        host,
+        port,
+        username,
+        responses,
+        jump_to_core_pub(jump),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     tindra_core::ssh::start_local_forward(
         handle,
         jump_handle,

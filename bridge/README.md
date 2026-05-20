@@ -1,25 +1,21 @@
 # bridge/
 
-This directory holds the [flutter_rust_bridge](https://github.com/fzyzcjy/flutter_rust_bridge) codegen configuration that wires `tindra-core` (Rust) to the Flutter apps in `apps/`.
+This directory keeps the legacy/shared `flutter_rust_bridge` configuration for the reusable `tindra-core` facade.
 
-## Workflow
+The active desktop application currently uses `apps/desktop/rust` as its Flutter Rust Bridge shim and delegates reusable behavior to `tindra-core` and the lower-level core crates. When adding desktop-facing APIs, edit `apps/desktop/rust/src/api/*.rs` and regenerate from `apps/desktop`.
 
-1. Edit the API surface in `core/crates/tindra-core/src/api/*.rs` (annotate types/functions with `#[frb(...)]` as needed).
-2. Run codegen:
+## Desktop Workflow
 
-   ```bash
-   cd bridge
-   flutter_rust_bridge_codegen generate
-   ```
+```powershell
+cd apps\desktop
+flutter_rust_bridge_codegen generate
+```
 
-3. Generated Dart lands in `apps/shared_ui/lib/src/bridge/` and is consumed by the Flutter apps.
+Generated bindings are committed under:
 
-## Why a separate `bridge/` directory?
+- `apps/desktop/lib/src/rust/`
+- `apps/desktop/rust/src/frb_generated.rs`
 
-- Keeps codegen config and scripts out of both the Rust workspace and the Flutter apps.
-- Scripts that wrap `flutter_rust_bridge_codegen` (e.g. CI invocations) live here.
-- Generated Dart is committed to `apps/shared_ui/` (the consumer), not here, so flutter pub get works without codegen.
+## Shared-Core Config
 
-## Phase 0 status
-
-The `core/crates/tindra-core/src/api/` directory is empty. The first task in Phase 0 is to add a `hello.rs` module with a single `pub async fn echo(s: String) -> String` and verify codegen + Flutter consumption end-to-end.
+`bridge/flutter_rust_bridge.yaml` remains as a reference config for exposing `core/crates/tindra-core/src/api/**/*.rs` directly to shared UI code later. It is not the current desktop app's primary bridge path.

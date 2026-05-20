@@ -3,8 +3,8 @@
 // tindra-sftp — SFTP client built on russh-sftp.
 //
 // Phase 6 ships a single-session SFTP browser (open + list + download +
-// upload + mkdir + delete). Pause/resume + concurrent transfer queue is
-// future work.
+// upload + mkdir + delete). Transfers use chunked IO; progress, hard cancel,
+// and resumed downloads are available for transfer UI.
 //
 // One SFTP session = one fresh SSH connection over which we request the
 // `sftp` subsystem. We deliberately don't share a connection with the
@@ -18,8 +18,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use russh_sftp::client::SftpSession;
-use tokio::io::AsyncWriteExt;
-use tindra_ssh::{open_session_agent, open_session_pubkey, JumpParams, SshError, SshHandle};
+use tindra_ssh::{
+    open_session_agent, open_session_keyboard_interactive, open_session_password,
+    open_session_pubkey, JumpParams, SshError, SshHandle,
+};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
@@ -34,6 +37,8 @@ pub enum SftpError {
     Russh(#[from] russh::Error),
     #[error("session {0} not found")]
     NotFound(u64),
+    #[error("transfer canceled")]
+    Canceled,
 }
 
 /// One row in a directory listing.
@@ -66,10 +71,7 @@ fn next_id() -> u64 {
     N.fetch_add(1, Ordering::SeqCst)
 }
 
-async fn start_sftp(
-    handle: SshHandle,
-    jump_handle: Option<SshHandle>,
-) -> Result<u64, SftpError> {
+async fn start_sftp(handle: SshHandle, jump_handle: Option<SshHandle>) -> Result<u64, SftpError> {
     let channel = handle.channel_open_session().await?;
     channel.request_subsystem(true, "sftp").await?;
     let stream = channel.into_stream();
@@ -109,9 +111,34 @@ pub async fn open_sftp_agent(
     start_sftp(handle, jump_handle).await
 }
 
+pub async fn open_sftp_password(
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    jump: Option<JumpParams>,
+) -> Result<u64, SftpError> {
+    let (handle, jump_handle) = open_session_password(host, port, username, password, jump).await?;
+    start_sftp(handle, jump_handle).await
+}
+
+pub async fn open_sftp_keyboard_interactive(
+    host: String,
+    port: u16,
+    username: String,
+    responses: Vec<String>,
+    jump: Option<JumpParams>,
+) -> Result<u64, SftpError> {
+    let (handle, jump_handle) =
+        open_session_keyboard_interactive(host, port, username, responses, jump).await?;
+    start_sftp(handle, jump_handle).await
+}
+
 pub async fn list_dir(session_id: u64, path: String) -> Result<Vec<DirEntry>, SftpError> {
     let guard = registry().lock().await;
-    let session = guard.get(&session_id).ok_or(SftpError::NotFound(session_id))?;
+    let session = guard
+        .get(&session_id)
+        .ok_or(SftpError::NotFound(session_id))?;
     let read = session.sftp.read_dir(path).await?;
     let mut out = Vec::new();
     for entry in read {
@@ -139,17 +166,69 @@ pub async fn download(
     remote_path: String,
     local_path: PathBuf,
 ) -> Result<u64, SftpError> {
-    let bytes = {
+    download_with_progress(session_id, remote_path, local_path, false, |_, _| true).await
+}
+
+pub async fn download_with_progress<F>(
+    session_id: u64,
+    remote_path: String,
+    local_path: PathBuf,
+    resume: bool,
+    mut on_progress: F,
+) -> Result<u64, SftpError>
+where
+    F: FnMut(u64, u64) -> bool + Send,
+{
+    let (mut remote_file, total) = {
         let guard = registry().lock().await;
-        let session = guard.get(&session_id).ok_or(SftpError::NotFound(session_id))?;
-        session.sftp.read(remote_path).await?
+        let session = guard
+            .get(&session_id)
+            .ok_or(SftpError::NotFound(session_id))?;
+        let file = session.sftp.open(remote_path).await?;
+        let total = file.metadata().await?.size.unwrap_or(0);
+        (file, total)
     };
     if let Some(parent) = local_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    let len = bytes.len() as u64;
-    tokio::fs::write(&local_path, bytes).await?;
-    Ok(len)
+    let mut transferred = 0u64;
+    let resume_from = if resume && total > 0 {
+        tokio::fs::metadata(&local_path)
+            .await
+            .map(|meta| meta.len().min(total))
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let mut local_file = if resume_from > 0 && resume_from < total {
+        remote_file
+            .seek(std::io::SeekFrom::Start(resume_from))
+            .await?;
+        transferred = resume_from;
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&local_path)
+            .await?
+    } else {
+        tokio::fs::File::create(&local_path).await?
+    };
+    let mut buf = vec![0u8; 64 * 1024];
+    if !on_progress(transferred, total) {
+        return Err(SftpError::Canceled);
+    }
+    loop {
+        let n = remote_file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        local_file.write_all(&buf[..n]).await?;
+        transferred += n as u64;
+        if !on_progress(transferred, total) {
+            return Err(SftpError::Canceled);
+        }
+    }
+    local_file.flush().await?;
+    Ok(transferred)
 }
 
 pub async fn upload(
@@ -157,28 +236,61 @@ pub async fn upload(
     local_path: PathBuf,
     remote_path: String,
 ) -> Result<u64, SftpError> {
-    let bytes = tokio::fs::read(&local_path).await?;
-    let len = bytes.len() as u64;
-    let guard = registry().lock().await;
-    let session = guard.get(&session_id).ok_or(SftpError::NotFound(session_id))?;
-    // sftp.write() opens with WRITE only, so it can't create new files.
-    // Use create() which truncates and creates as needed.
-    let mut file = session.sftp.create(remote_path).await?;
-    file.write_all(&bytes).await?;
-    file.shutdown().await?;
-    Ok(len)
+    upload_with_progress(session_id, local_path, remote_path, |_, _| true).await
+}
+
+pub async fn upload_with_progress<F>(
+    session_id: u64,
+    local_path: PathBuf,
+    remote_path: String,
+    mut on_progress: F,
+) -> Result<u64, SftpError>
+where
+    F: FnMut(u64, u64) -> bool + Send,
+{
+    let mut local_file = tokio::fs::File::open(&local_path).await?;
+    let total = local_file.metadata().await?.len();
+    let mut remote_file = {
+        let guard = registry().lock().await;
+        let session = guard
+            .get(&session_id)
+            .ok_or(SftpError::NotFound(session_id))?;
+        session.sftp.create(remote_path).await?
+    };
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut transferred = 0u64;
+    if !on_progress(transferred, total) {
+        return Err(SftpError::Canceled);
+    }
+    loop {
+        let n = local_file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        remote_file.write_all(&buf[..n]).await?;
+        transferred += n as u64;
+        if !on_progress(transferred, total) {
+            return Err(SftpError::Canceled);
+        }
+    }
+    remote_file.shutdown().await?;
+    Ok(transferred)
 }
 
 pub async fn make_dir(session_id: u64, path: String) -> Result<(), SftpError> {
     let guard = registry().lock().await;
-    let session = guard.get(&session_id).ok_or(SftpError::NotFound(session_id))?;
+    let session = guard
+        .get(&session_id)
+        .ok_or(SftpError::NotFound(session_id))?;
     session.sftp.create_dir(path).await?;
     Ok(())
 }
 
 pub async fn remove(session_id: u64, path: String, is_dir: bool) -> Result<(), SftpError> {
     let guard = registry().lock().await;
-    let session = guard.get(&session_id).ok_or(SftpError::NotFound(session_id))?;
+    let session = guard
+        .get(&session_id)
+        .ok_or(SftpError::NotFound(session_id))?;
     if is_dir {
         session.sftp.remove_dir(path).await?;
     } else {
@@ -197,6 +309,8 @@ pub async fn close(session_id: u64) -> Result<(), SftpError> {
 /// Best-effort: ask the server for the user's home directory.
 pub async fn home_dir(session_id: u64) -> Result<String, SftpError> {
     let guard = registry().lock().await;
-    let session = guard.get(&session_id).ok_or(SftpError::NotFound(session_id))?;
+    let session = guard
+        .get(&session_id)
+        .ok_or(SftpError::NotFound(session_id))?;
     Ok(session.sftp.canonicalize(".".to_string()).await?)
 }

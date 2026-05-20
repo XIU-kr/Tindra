@@ -7,7 +7,11 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'ssh.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`
+// These functions are ignored because they are not marked as `pub`: `register_transfer`, `transfer_cancellations_lock`, `transfer_cancellations`, `unregister_transfer`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`
+
+Future<bool> cancelSftpTransfer({required String transferId}) =>
+    RustLib.instance.api.crateApiSftpCancelSftpTransfer(transferId: transferId);
 
 Future<BigInt> openSftpPubkey({
   required String host,
@@ -37,6 +41,34 @@ Future<BigInt> openSftpAgent({
   jump: jump,
 );
 
+Future<BigInt> openSftpPassword({
+  required String host,
+  required int port,
+  required String username,
+  required String password,
+  required JumpHost jump,
+}) => RustLib.instance.api.crateApiSftpOpenSftpPassword(
+  host: host,
+  port: port,
+  username: username,
+  password: password,
+  jump: jump,
+);
+
+Future<BigInt> openSftpKeyboardInteractive({
+  required String host,
+  required int port,
+  required String username,
+  required List<String> responses,
+  required JumpHost jump,
+}) => RustLib.instance.api.crateApiSftpOpenSftpKeyboardInteractive(
+  host: host,
+  port: port,
+  username: username,
+  responses: responses,
+  jump: jump,
+);
+
 Future<List<SftpEntry>> sftpList({
   required BigInt sessionId,
   required String path,
@@ -53,11 +85,37 @@ Future<BigInt> sftpDownload({
   localPath: localPath,
 );
 
+Stream<SftpTransferProgress> sftpDownloadWithProgress({
+  required String transferId,
+  required BigInt sessionId,
+  required String remotePath,
+  required String localPath,
+  required bool resume,
+}) => RustLib.instance.api.crateApiSftpSftpDownloadWithProgress(
+  transferId: transferId,
+  sessionId: sessionId,
+  remotePath: remotePath,
+  localPath: localPath,
+  resume: resume,
+);
+
 Future<BigInt> sftpUpload({
   required BigInt sessionId,
   required String localPath,
   required String remotePath,
 }) => RustLib.instance.api.crateApiSftpSftpUpload(
+  sessionId: sessionId,
+  localPath: localPath,
+  remotePath: remotePath,
+);
+
+Stream<SftpTransferProgress> sftpUploadWithProgress({
+  required String transferId,
+  required BigInt sessionId,
+  required String localPath,
+  required String remotePath,
+}) => RustLib.instance.api.crateApiSftpSftpUploadWithProgress(
+  transferId: transferId,
   sessionId: sessionId,
   localPath: localPath,
   remotePath: remotePath,
@@ -122,4 +180,29 @@ class SftpEntry {
           size == other.size &&
           mtime == other.mtime &&
           permissions == other.permissions;
+}
+
+class SftpTransferProgress {
+  final BigInt bytesTransferred;
+  final BigInt totalBytes;
+  final bool done;
+
+  const SftpTransferProgress({
+    required this.bytesTransferred,
+    required this.totalBytes,
+    required this.done,
+  });
+
+  @override
+  int get hashCode =>
+      bytesTransferred.hashCode ^ totalBytes.hashCode ^ done.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SftpTransferProgress &&
+          runtimeType == other.runtimeType &&
+          bytesTransferred == other.bytesTransferred &&
+          totalBytes == other.totalBytes &&
+          done == other.done;
 }

@@ -107,7 +107,7 @@ abstract class AppLocalizations {
   /// No description provided for @appTitleWithProfile.
   ///
   /// In en, this message translates to:
-  /// **'Tindra · {profile}'**
+  /// **'Tindra - {profile}'**
   String appTitleWithProfile(Object profile);
 
   /// No description provided for @profiles.
@@ -115,6 +115,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Profiles'**
   String get profiles;
+
+  /// No description provided for @sessions.
+  ///
+  /// In en, this message translates to:
+  /// **'Sessions'**
+  String get sessions;
+
+  /// No description provided for @files.
+  ///
+  /// In en, this message translates to:
+  /// **'Files'**
+  String get files;
+
+  /// No description provided for @forwards.
+  ///
+  /// In en, this message translates to:
+  /// **'Forwards'**
+  String get forwards;
+
+  /// No description provided for @hostKeys.
+  ///
+  /// In en, this message translates to:
+  /// **'Host keys'**
+  String get hostKeys;
+
+  /// No description provided for @home.
+  ///
+  /// In en, this message translates to:
+  /// **'Home'**
+  String get home;
 
   /// No description provided for @newProfile.
   ///
@@ -176,11 +206,71 @@ abstract class AppLocalizations {
   /// **'Refresh'**
   String get refresh;
 
+  /// No description provided for @retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get retry;
+
+  /// No description provided for @download.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get download;
+
+  /// No description provided for @upload.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload'**
+  String get upload;
+
+  /// No description provided for @localPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Local path'**
+  String get localPath;
+
+  /// No description provided for @remotePath.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote path'**
+  String get remotePath;
+
+  /// No description provided for @localFileNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'Local file not found: {path}'**
+  String localFileNotFound(Object path);
+
+  /// No description provided for @overwrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Overwrite'**
+  String get overwrite;
+
+  /// No description provided for @overwriteFileQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Overwrite local file?'**
+  String get overwriteFileQuestion;
+
+  /// No description provided for @overwriteFileContent.
+  ///
+  /// In en, this message translates to:
+  /// **'{path} already exists. Replace it?'**
+  String overwriteFileContent(Object path);
+
   /// No description provided for @settings.
   ///
   /// In en, this message translates to:
   /// **'Settings'**
   String get settings;
+
+  /// No description provided for @search.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get search;
 
   /// No description provided for @settingsTooltip.
   ///
@@ -212,6 +302,48 @@ abstract class AppLocalizations {
   /// **'Open local shell'**
   String get openLocalShell;
 
+  /// No description provided for @localShell.
+  ///
+  /// In en, this message translates to:
+  /// **'Local shell'**
+  String get localShell;
+
+  /// No description provided for @localShellCommand.
+  ///
+  /// In en, this message translates to:
+  /// **'Shell command'**
+  String get localShellCommand;
+
+  /// No description provided for @localShellCommandHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty to use the platform default shell.'**
+  String get localShellCommandHint;
+
+  /// No description provided for @localShellWorkingDirectory.
+  ///
+  /// In en, this message translates to:
+  /// **'Working directory'**
+  String get localShellWorkingDirectory;
+
+  /// No description provided for @localShellWorkingDirectoryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional start folder for new local shell tabs.'**
+  String get localShellWorkingDirectoryHint;
+
+  /// No description provided for @localShellEnvironment.
+  ///
+  /// In en, this message translates to:
+  /// **'Environment'**
+  String get localShellEnvironment;
+
+  /// No description provided for @localShellEnvironmentHint.
+  ///
+  /// In en, this message translates to:
+  /// **'One NAME=value entry per line. Lines starting with # are ignored.'**
+  String get localShellEnvironmentHint;
+
   /// No description provided for @edit.
   ///
   /// In en, this message translates to:
@@ -239,8 +371,74 @@ abstract class AppLocalizations {
   /// No description provided for @noOpenSessions.
   ///
   /// In en, this message translates to:
-  /// **'no open sessions'**
+  /// **'No open sessions'**
   String get noOpenSessions;
+
+  /// No description provided for @liveSessionsSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{sessions} live sessions | {profiles} profiles | local workspace ready'**
+  String liveSessionsSummary(Object profiles, Object sessions);
+
+  /// No description provided for @quickstart.
+  ///
+  /// In en, this message translates to:
+  /// **'Quickstart'**
+  String get quickstart;
+
+  /// No description provided for @pressPaletteHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Press Ctrl+K to summon the palette'**
+  String get pressPaletteHint;
+
+  /// No description provided for @pickProfileOrPalette.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a profile, or press Ctrl+K to run a command.'**
+  String get pickProfileOrPalette;
+
+  /// No description provided for @all.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get all;
+
+  /// No description provided for @goodMorning.
+  ///
+  /// In en, this message translates to:
+  /// **'Good morning.'**
+  String get goodMorning;
+
+  /// No description provided for @goodAfternoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Good afternoon.'**
+  String get goodAfternoon;
+
+  /// No description provided for @goodEvening.
+  ///
+  /// In en, this message translates to:
+  /// **'Good evening.'**
+  String get goodEvening;
+
+  /// No description provided for @profileCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} profiles'**
+  String profileCount(Object count);
+
+  /// No description provided for @profilesLede.
+  ///
+  /// In en, this message translates to:
+  /// **'Local-only | encrypted at rest. Pair another device to sync.'**
+  String get profilesLede;
+
+  /// No description provided for @importKeys.
+  ///
+  /// In en, this message translates to:
+  /// **'Import keys'**
+  String get importKeys;
 
   /// No description provided for @pickProfileToOpen.
   ///
@@ -257,14 +455,26 @@ abstract class AppLocalizations {
   /// No description provided for @pickProfilePrompt.
   ///
   /// In en, this message translates to:
-  /// **'Pick a profile on the left, then \"Open\" to start a session.'**
+  /// **'Pick a profile, then open it to start a session.'**
   String get pickProfilePrompt;
 
   /// No description provided for @connectingTo.
   ///
   /// In en, this message translates to:
-  /// **'Connecting to {name}…'**
+  /// **'Connecting to {name}'**
   String connectingTo(Object name);
+
+  /// No description provided for @connected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get connected;
+
+  /// No description provided for @connecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting'**
+  String get connecting;
 
   /// No description provided for @disconnected.
   ///
@@ -272,10 +482,22 @@ abstract class AppLocalizations {
   /// **'Disconnected'**
   String get disconnected;
 
+  /// No description provided for @sessionDisconnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Session disconnected'**
+  String get sessionDisconnected;
+
+  /// No description provided for @sessionDisconnectedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'The session is disconnected.'**
+  String get sessionDisconnectedMessage;
+
   /// No description provided for @waitingForFirstChunk.
   ///
   /// In en, this message translates to:
-  /// **'waiting for first chunk…'**
+  /// **'Waiting for first terminal output'**
   String get waitingForFirstChunk;
 
   /// No description provided for @copyScreenTooltip.
@@ -290,11 +512,113 @@ abstract class AppLocalizations {
   /// **'Paste clipboard (Ctrl+Shift+V)'**
   String get pasteClipboardTooltip;
 
+  /// No description provided for @paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste'**
+  String get paste;
+
+  /// No description provided for @confirmPasteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste into terminal?'**
+  String get confirmPasteTitle;
+
+  /// No description provided for @confirmPasteContent.
+  ///
+  /// In en, this message translates to:
+  /// **'This clipboard payload has {lineCount} lines and {byteCount} bytes. Paste it into the active session?'**
+  String confirmPasteContent(Object byteCount, Object lineCount);
+
   /// No description provided for @reconnectTooltip.
   ///
   /// In en, this message translates to:
   /// **'Reconnect (Ctrl+Shift+R)'**
   String get reconnectTooltip;
+
+  /// No description provided for @disconnectTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnect'**
+  String get disconnectTooltip;
+
+  /// No description provided for @copyError.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy error'**
+  String get copyError;
+
+  /// No description provided for @searchRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Search | run'**
+  String get searchRun;
+
+  /// No description provided for @syncStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync'**
+  String get syncStatus;
+
+  /// No description provided for @pairedDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired ({count})'**
+  String pairedDevices(Object count);
+
+  /// No description provided for @splitRight.
+  ///
+  /// In en, this message translates to:
+  /// **'Split right'**
+  String get splitRight;
+
+  /// No description provided for @splitDown.
+  ///
+  /// In en, this message translates to:
+  /// **'Split down'**
+  String get splitDown;
+
+  /// No description provided for @toggleSftpBrowser.
+  ///
+  /// In en, this message translates to:
+  /// **'Toggle SFTP browser'**
+  String get toggleSftpBrowser;
+
+  /// No description provided for @runCommandOrJump.
+  ///
+  /// In en, this message translates to:
+  /// **'Run a command, or jump to a profile...'**
+  String get runCommandOrJump;
+
+  /// No description provided for @paletteProfilesSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Profiles'**
+  String get paletteProfilesSection;
+
+  /// No description provided for @paletteCommandsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Commands'**
+  String get paletteCommandsSection;
+
+  /// No description provided for @open.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get open;
+
+  /// No description provided for @navigate.
+  ///
+  /// In en, this message translates to:
+  /// **'Navigate'**
+  String get navigate;
+
+  /// No description provided for @select.
+  ///
+  /// In en, this message translates to:
+  /// **'Select'**
+  String get select;
 
   /// No description provided for @trustedHostKeys.
   ///
@@ -341,19 +665,19 @@ abstract class AppLocalizations {
   /// No description provided for @firstSeen.
   ///
   /// In en, this message translates to:
-  /// **'first seen'**
+  /// **'First seen'**
   String get firstSeen;
 
   /// No description provided for @lastSeen.
   ///
   /// In en, this message translates to:
-  /// **'last seen'**
+  /// **'Last seen'**
   String get lastSeen;
 
   /// No description provided for @unknown.
   ///
   /// In en, this message translates to:
-  /// **'unknown'**
+  /// **'Unknown'**
   String get unknown;
 
   /// No description provided for @theme.
@@ -482,6 +806,83 @@ abstract class AppLocalizations {
   /// **'SSH agent'**
   String get sshAgent;
 
+  /// No description provided for @password.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get password;
+
+  /// No description provided for @keyboardInteractive.
+  ///
+  /// In en, this message translates to:
+  /// **'Keyboard-interactive'**
+  String get keyboardInteractive;
+
+  /// No description provided for @passwordFor.
+  ///
+  /// In en, this message translates to:
+  /// **'Password for {profile}'**
+  String passwordFor(Object profile);
+
+  /// No description provided for @passwordRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Password required.'**
+  String get passwordRequired;
+
+  /// No description provided for @connect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get connect;
+
+  /// No description provided for @trust.
+  ///
+  /// In en, this message translates to:
+  /// **'Trust'**
+  String get trust;
+
+  /// No description provided for @trustHostKeyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Trust this host key?'**
+  String get trustHostKeyTitle;
+
+  /// No description provided for @trustHostKeyContent.
+  ///
+  /// In en, this message translates to:
+  /// **'{host}:{port} presented this fingerprint:\n\n{fingerprint}\n\nOnly trust it if it matches the server you expect.'**
+  String trustHostKeyContent(Object fingerprint, Object host, Object port);
+
+  /// No description provided for @hostKeyChangedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Host key changed'**
+  String get hostKeyChangedTitle;
+
+  /// No description provided for @hostKeyChangedContent.
+  ///
+  /// In en, this message translates to:
+  /// **'{host}:{port} presented a different host key.\n\nTrusted:\n{expected}\n\nPresented:\n{actual}\n\nTindra blocked the connection.'**
+  String hostKeyChangedContent(
+    Object actual,
+    Object expected,
+    Object host,
+    Object port,
+  );
+
+  /// No description provided for @replaceHostKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace host key'**
+  String get replaceHostKey;
+
+  /// No description provided for @hostKeyNotTrusted.
+  ///
+  /// In en, this message translates to:
+  /// **'Host key was not trusted.'**
+  String get hostKeyNotTrusted;
+
   /// No description provided for @privateKeyPath.
   ///
   /// In en, this message translates to:
@@ -509,8 +910,404 @@ abstract class AppLocalizations {
   /// No description provided for @optional.
   ///
   /// In en, this message translates to:
-  /// **'optional'**
+  /// **'Optional'**
   String get optional;
+
+  /// No description provided for @preferences.
+  ///
+  /// In en, this message translates to:
+  /// **'Preferences'**
+  String get preferences;
+
+  /// No description provided for @settingsLede.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme, accent and density apply immediately. Other changes are saved when you click Apply.'**
+  String get settingsLede;
+
+  /// No description provided for @apply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get apply;
+
+  /// No description provided for @appearance.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get appearance;
+
+  /// No description provided for @appearanceThemeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Use dark or light mode for the app shell.'**
+  String get appearanceThemeHint;
+
+  /// No description provided for @accent.
+  ///
+  /// In en, this message translates to:
+  /// **'Accent'**
+  String get accent;
+
+  /// No description provided for @accentHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Used for live indicators, focus, and highlights.'**
+  String get accentHint;
+
+  /// No description provided for @density.
+  ///
+  /// In en, this message translates to:
+  /// **'Density'**
+  String get density;
+
+  /// No description provided for @densityHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tighter rows fit more on a smaller screen.'**
+  String get densityHint;
+
+  /// No description provided for @cozy.
+  ///
+  /// In en, this message translates to:
+  /// **'Cozy'**
+  String get cozy;
+
+  /// No description provided for @compact.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact'**
+  String get compact;
+
+  /// No description provided for @terminal.
+  ///
+  /// In en, this message translates to:
+  /// **'Terminal'**
+  String get terminal;
+
+  /// No description provided for @font.
+  ///
+  /// In en, this message translates to:
+  /// **'Font'**
+  String get font;
+
+  /// No description provided for @fontHint.
+  ///
+  /// In en, this message translates to:
+  /// **'JetBrains Mono is bundled. Falls back to Cascadia Mono / Consolas.'**
+  String get fontHint;
+
+  /// No description provided for @syncSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync · system'**
+  String get syncSystem;
+
+  /// No description provided for @diagnostics.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostics'**
+  String get diagnostics;
+
+  /// No description provided for @appVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'App version'**
+  String get appVersion;
+
+  /// No description provided for @rustCoreVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Rust core version'**
+  String get rustCoreVersion;
+
+  /// No description provided for @profilesPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Profiles path'**
+  String get profilesPath;
+
+  /// No description provided for @settingsPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings path'**
+  String get settingsPath;
+
+  /// No description provided for @expectedLogDirectory.
+  ///
+  /// In en, this message translates to:
+  /// **'Expected log directory'**
+  String get expectedLogDirectory;
+
+  /// No description provided for @loading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading...'**
+  String get loading;
+
+  /// No description provided for @quakeHotkey.
+  ///
+  /// In en, this message translates to:
+  /// **'Quake hotkey'**
+  String get quakeHotkey;
+
+  /// No description provided for @quakeHotkeyDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Global key to summon Tindra over any window.'**
+  String get quakeHotkeyDescription;
+
+  /// No description provided for @newProfileEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'New profile'**
+  String get newProfileEyebrow;
+
+  /// No description provided for @editProfileEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit profile'**
+  String get editProfileEyebrow;
+
+  /// No description provided for @newProfileTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A new connection'**
+  String get newProfileTitle;
+
+  /// No description provided for @filesSftpEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Files | SFTP'**
+  String get filesSftpEyebrow;
+
+  /// No description provided for @browseRemote.
+  ///
+  /// In en, this message translates to:
+  /// **'Browse remote'**
+  String get browseRemote;
+
+  /// No description provided for @filesSftpLede.
+  ///
+  /// In en, this message translates to:
+  /// **'Drag in to upload, drag out to download. Transfers queue on the right.'**
+  String get filesSftpLede;
+
+  /// No description provided for @up.
+  ///
+  /// In en, this message translates to:
+  /// **'Up'**
+  String get up;
+
+  /// No description provided for @tableName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get tableName;
+
+  /// No description provided for @tableSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Size'**
+  String get tableSize;
+
+  /// No description provided for @tableModified.
+  ///
+  /// In en, this message translates to:
+  /// **'Modified'**
+  String get tableModified;
+
+  /// No description provided for @tags.
+  ///
+  /// In en, this message translates to:
+  /// **'Tags'**
+  String get tags;
+
+  /// No description provided for @addSshProfileToBrowse.
+  ///
+  /// In en, this message translates to:
+  /// **'Add an SSH profile to browse files.'**
+  String get addSshProfileToBrowse;
+
+  /// No description provided for @connectingEllipsis.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting...'**
+  String get connectingEllipsis;
+
+  /// No description provided for @transfers.
+  ///
+  /// In en, this message translates to:
+  /// **'Transfers'**
+  String get transfers;
+
+  /// No description provided for @idle.
+  ///
+  /// In en, this message translates to:
+  /// **'Idle'**
+  String get idle;
+
+  /// No description provided for @activeTransferCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} active'**
+  String activeTransferCount(Object count);
+
+  /// No description provided for @failedTransferCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} failed'**
+  String failedTransferCount(Object count);
+
+  /// No description provided for @noTransfersInFlight.
+  ///
+  /// In en, this message translates to:
+  /// **'No transfers in flight'**
+  String get noTransfersInFlight;
+
+  /// No description provided for @networkPortForwardsEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Network | port forwards'**
+  String get networkPortForwardsEyebrow;
+
+  /// No description provided for @forwardsLede.
+  ///
+  /// In en, this message translates to:
+  /// **'Local tunnels listen on your machine through the selected SSH profile.'**
+  String get forwardsLede;
+
+  /// No description provided for @newForward.
+  ///
+  /// In en, this message translates to:
+  /// **'New forward'**
+  String get newForward;
+
+  /// No description provided for @noActiveTunnels.
+  ///
+  /// In en, this message translates to:
+  /// **'No active tunnels'**
+  String get noActiveTunnels;
+
+  /// No description provided for @pickProfileThenForward.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a profile, then create a forward.'**
+  String get pickProfileThenForward;
+
+  /// No description provided for @openLocalForwardToProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Open a local forward to {name} to get started.'**
+  String openLocalForwardToProfile(Object name);
+
+  /// No description provided for @openStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get openStatus;
+
+  /// No description provided for @local.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get local;
+
+  /// No description provided for @remote.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote'**
+  String get remote;
+
+  /// No description provided for @via.
+  ///
+  /// In en, this message translates to:
+  /// **'Via'**
+  String get via;
+
+  /// No description provided for @reconnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect'**
+  String get reconnect;
+
+  /// No description provided for @drop.
+  ///
+  /// In en, this message translates to:
+  /// **'Drop'**
+  String get drop;
+
+  /// No description provided for @trustHostKeysEyebrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Trust | host keys'**
+  String get trustHostKeysEyebrow;
+
+  /// No description provided for @noTrustedKeysYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No trusted keys yet'**
+  String get noTrustedKeysYet;
+
+  /// No description provided for @connectOnceRememberHost.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to a host once and Tindra will remember it.'**
+  String get connectOnceRememberHost;
+
+  /// No description provided for @first.
+  ///
+  /// In en, this message translates to:
+  /// **'First'**
+  String get first;
+
+  /// No description provided for @last.
+  ///
+  /// In en, this message translates to:
+  /// **'Last'**
+  String get last;
+
+  /// No description provided for @started.
+  ///
+  /// In en, this message translates to:
+  /// **'Started'**
+  String get started;
+
+  /// No description provided for @active.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get active;
+
+  /// No description provided for @notAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'N/A'**
+  String get notAvailable;
+
+  /// No description provided for @localForward.
+  ///
+  /// In en, this message translates to:
+  /// **'Local forward'**
+  String get localForward;
+
+  /// No description provided for @localForwardDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'A listener on your machine that tunnels through {name}.'**
+  String localForwardDescription(Object name);
+
+  /// No description provided for @localAddr.
+  ///
+  /// In en, this message translates to:
+  /// **'Local addr'**
+  String get localAddr;
+
+  /// No description provided for @remoteHost.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote host'**
+  String get remoteHost;
 
   /// No description provided for @unnamed.
   ///

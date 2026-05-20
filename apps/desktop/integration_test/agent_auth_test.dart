@@ -24,46 +24,50 @@ void main() {
     await RustLib.init();
   });
 
-  test('openShellAgent surfaces agent state without crashing', () async {
-    BigInt? sessionId;
-    String? error;
-    try {
-      sessionId = await rust.openShellAgent(
-        host: 'localhost',
-        port: 22,
-        username: 'XIU',
-        cols: 120,
-        rows: 32,
-        jump: const rust.JumpHost(
-          host: '',
+  test(
+    'openShellAgent surfaces agent state without crashing',
+    () async {
+      BigInt? sessionId;
+      String? error;
+      try {
+        sessionId = await rust.openShellAgent(
+          host: 'localhost',
           port: 22,
-          username: '',
-          privateKeyPath: '',
-          passphrase: null,
-        ),
-      );
-    } catch (e) {
-      error = e.toString();
-    }
+          username: 'XIU',
+          cols: 120,
+          rows: 32,
+          jump: const rust.JumpHost(
+            host: '',
+            port: 22,
+            username: '',
+            privateKeyPath: '',
+            passphrase: null,
+          ),
+        );
+      } catch (e) {
+        error = e.toString();
+      }
 
-    if (sessionId != null) {
-      // Success path — agent is up, key is added, server accepted it.
-      expect(sessionId, isNotNull);
-      await rust.shellClose(sessionId: sessionId);
-    } else {
-      // Expected when ssh-agent isn't running or has no identities. The
-      // exact message comes from tindra-ssh's SshError variants.
-      expect(error, isNotNull);
-      expect(
-        error!.toLowerCase(),
-        anyOf(
-          contains('agent'),
-          contains('pipe'),
-          contains('identities'),
-          contains('authentication failed'),
-        ),
-        reason: 'agent failure should produce a recognisable error',
-      );
-    }
-  }, timeout: const Timeout(Duration(seconds: 15)));
+      if (sessionId != null) {
+        // Success path — agent is up, key is added, server accepted it.
+        expect(sessionId, isNotNull);
+        await rust.shellClose(sessionId: sessionId);
+      } else {
+        // Expected when ssh-agent isn't running or has no identities. The
+        // exact message comes from tindra-ssh's SshError variants.
+        expect(error, isNotNull);
+        expect(
+          error!.toLowerCase(),
+          anyOf(
+            contains('agent'),
+            contains('pipe'),
+            contains('identities'),
+            contains('authentication failed'),
+          ),
+          reason: 'agent failure should produce a recognisable error',
+        );
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 15)),
+  );
 }

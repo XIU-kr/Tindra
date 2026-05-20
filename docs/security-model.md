@@ -1,43 +1,48 @@
-# Security model
+# Security Model
 
-> **Status:** Stub. To be filled in during Phase 0–1.
+This document records the current desktop security posture and the intended boundaries for future sync and plugin surfaces.
 
-## Threat model
+## Threat Model
 
 In scope:
-- Theft of a device storing Tindra data (encrypted at rest).
-- Compromise of the sync relay (must see only ciphertext).
-- Malicious plugins (sandboxed by default, explicit grants required).
-- Network attackers between client and SSH host (mitigated by SSH host key verification).
 
-Out of scope (initially):
-- A compromised host operating system — if your OS is rooted, no app-level defence is sufficient.
-- Side-channel attacks against the SQLCipher database file.
-- Targeted attacks against the Tindra binary itself (we ship signed releases but don't claim attestation).
+- Theft of a device storing Tindra local data.
+- Network attackers between the client and SSH host.
+- SSH host-key changes after a key has already been trusted.
+- Accidental persistence of interactive authentication secrets.
 
-## Secrets handling
+Out of scope:
 
-- Master passphrase: never persisted. Used to derive the master key via Argon2id.
-- Master key (age `X25519` keypair): held in OS keystore (Keychain/DPAPI/libsecret/Android Keystore).
-- In-memory secrets: `zeroize` on drop.
-- Local store: SQLCipher with the master key.
+- A compromised host operating system.
+- Attestation of the Tindra binary itself.
+- Malicious remote SSH servers beyond what SSH protocol and UI warnings can surface.
 
-## Sync
+## Secrets Handling
 
-- All payloads are age-encrypted on the device before upload.
-- The sync server (whether self-hosted or BYO cloud) sees only ciphertext + opaque metadata (record IDs, version vectors).
-- Conflict resolution is local; server cannot influence resolution.
+- SSH passwords and keyboard-interactive responses are entered at connection time and are not saved into profiles.
+- Private-key passphrases are connection-time inputs.
+- Profile, settings, and trusted host-key metadata are stored locally as JSON.
+- Secret storage uses platform facilities where implemented:
+  - Windows: DPAPI-protected local secret records.
+  - macOS/iOS: Keychain through the Rust store layer.
+  - Linux: libsecret through the Rust store layer.
+  - Android: backend identifier is reserved until the Android runner bridge is generated.
+- In-memory secret types use `zeroize` where the surrounding model supports it.
 
-## Host-key verification
+## Host-Key Verification
 
-- Trust on first use, with explicit warning.
-- Subsequent fingerprint changes require explicit user re-approval.
-- `known_hosts` interop is supported on import.
+- SSH and SFTP connections perform host-key preflight before opening a session.
+- Unknown host keys are shown to the user and saved only after explicit approval.
+- Trusted host keys connect without prompting.
+- Changed host keys are blocked by default and show both the old and new fingerprints.
+- Replacing a changed key requires an explicit replace action; it is not automatic TOFU.
 
-## Plugins
+## Sync Boundary
 
-- Default deny on every capability.
-- Explicit user grant per plugin per capability (`terminal:read`, `terminal:write`, `network:host=*.example.com`, `profiles:read`).
-- Capability prompts include the plugin's signed manifest, verified against the publisher's key.
+The current desktop app is local-first. Sync crates and roadmap documents exist, but a hosted sync backend is not part of the current Windows desktop implementation.
 
-(More to come.)
+Future sync payloads must be encrypted on the device before upload, and the relay must not receive plaintext profile, key, snippet, or secret values.
+
+## Plugin Boundary
+
+The plugin crate is a boundary placeholder. Any future plugin runtime must keep default-deny capability grants and must not expose terminal output, profile data, network access, or filesystem access without explicit user approval.

@@ -57,46 +57,54 @@ void main() {
     }
   });
 
-  testWidgets('Ctrl+Shift+H splits the active tab into two sessions',
-      (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets(
+    'Ctrl+Shift+H splits the active tab into two sessions',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
 
-    await tester.pumpWidget(const TindraApp());
-    await _settle(tester,
-        predicate: () => find.text(_profileName).evaluate().isNotEmpty);
+      await tester.pumpWidget(const TindraApp());
+      await _settle(
+        tester,
+        predicate: () => find.text(_profileName).evaluate().isNotEmpty,
+      );
 
-    // Open first session via Ctrl+T.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      // Open first session via Ctrl+T.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _tabDots(tester) == 1,
-    );
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _tabDots(tester) == 1,
+      );
 
-    // Split horizontally — should add a second session inside the same tab.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      // Split horizontally — should add a second session inside the same tab.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 
-    // Tab count stays at 1 (the dot in the tab bar reflects the active
-    // session of the active tab — still one tab).
-    await _settle(
-      tester,
-      timeout: const Duration(seconds: 15),
-      predicate: () => _tabDots(tester) == 1 && _splitFrames(tester) >= 2,
-    );
+      // Tab count stays at 1 (the dot in the tab bar reflects the active
+      // session of the active tab — still one tab).
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 15),
+        predicate: () => _tabDots(tester) == 1 && _splitFrames(tester) >= 2,
+      );
 
-    expect(_tabDots(tester), 1, reason: 'still a single tab in the bar');
-    expect(_splitFrames(tester), greaterThanOrEqualTo(2),
-        reason: 'split should render two terminal frames');
-  }, timeout: const Timeout(Duration(minutes: 1)));
+      expect(_tabDots(tester), 1, reason: 'still a single tab in the bar');
+      expect(
+        _splitFrames(tester),
+        greaterThanOrEqualTo(2),
+        reason: 'split should render two terminal frames',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 1)),
+  );
 }
 
 Future<void> _settle(

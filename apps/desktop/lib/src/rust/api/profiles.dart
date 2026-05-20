@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
 
 /// All saved profiles, sorted by name.
 Future<List<Profile>> listProfiles() =>
@@ -27,6 +27,28 @@ Future<String> profilesPath() =>
 /// Trusted SSH host keys stored by trust-on-first-use.
 Future<List<HostKey>> listHostKeys() =>
     RustLib.instance.api.crateApiProfilesListHostKeys();
+
+/// Check a fingerprint without trusting or updating it.
+Future<HostKeyCheck> checkHostKey({
+  required String host,
+  required int port,
+  required String fingerprint,
+}) => RustLib.instance.api.crateApiProfilesCheckHostKey(
+  host: host,
+  port: port,
+  fingerprint: fingerprint,
+);
+
+/// Store a host key only after explicit user approval.
+Future<void> trustHostKey({
+  required String host,
+  required int port,
+  required String fingerprint,
+}) => RustLib.instance.api.crateApiProfilesTrustHostKey(
+  host: host,
+  port: port,
+  fingerprint: fingerprint,
+);
 
 /// Remove a trusted host key so the next connection can trust a new key.
 Future<void> deleteHostKey({required String host, required int port}) =>
@@ -67,6 +89,31 @@ class HostKey {
           lastSeenUnixMs == other.lastSeenUnixMs;
 }
 
+class HostKeyCheck {
+  /// "new", "trusted", or "changed".
+  final String status;
+  final String expected;
+  final String actual;
+
+  const HostKeyCheck({
+    required this.status,
+    required this.expected,
+    required this.actual,
+  });
+
+  @override
+  int get hashCode => status.hashCode ^ expected.hashCode ^ actual.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HostKeyCheck &&
+          runtimeType == other.runtimeType &&
+          status == other.status &&
+          expected == other.expected &&
+          actual == other.actual;
+}
+
 class Profile {
   /// Stable id. Empty string when calling upsert for a brand-new profile —
   /// the store will assign one and return it in the result.
@@ -78,7 +125,7 @@ class Profile {
   final String privateKeyPath;
   final String notes;
 
-  /// "key" or "agent". Defaults to "key" when reading older profiles.
+  /// "key", "agent", or "password". Defaults to "key" when reading older profiles.
   final String authMethod;
 
   /// Optional jump host. Empty `jump_host` means no jump.

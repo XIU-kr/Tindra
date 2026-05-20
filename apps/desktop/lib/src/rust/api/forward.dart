@@ -9,6 +9,166 @@ import 'ssh.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`
 
+Future<BigInt> openSocksForwardPubkey({
+  required String host,
+  required int port,
+  required String username,
+  required String privateKeyPath,
+  String? passphrase,
+  required JumpHost jump,
+  required String localAddr,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenSocksForwardPubkey(
+  host: host,
+  port: port,
+  username: username,
+  privateKeyPath: privateKeyPath,
+  passphrase: passphrase,
+  jump: jump,
+  localAddr: localAddr,
+  localPort: localPort,
+);
+
+Future<BigInt> openSocksForwardAgent({
+  required String host,
+  required int port,
+  required String username,
+  required JumpHost jump,
+  required String localAddr,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenSocksForwardAgent(
+  host: host,
+  port: port,
+  username: username,
+  jump: jump,
+  localAddr: localAddr,
+  localPort: localPort,
+);
+
+Future<BigInt> openSocksForwardPassword({
+  required String host,
+  required int port,
+  required String username,
+  required String password,
+  required JumpHost jump,
+  required String localAddr,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenSocksForwardPassword(
+  host: host,
+  port: port,
+  username: username,
+  password: password,
+  jump: jump,
+  localAddr: localAddr,
+  localPort: localPort,
+);
+
+Future<BigInt> openSocksForwardKeyboardInteractive({
+  required String host,
+  required int port,
+  required String username,
+  required List<String> responses,
+  required JumpHost jump,
+  required String localAddr,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenSocksForwardKeyboardInteractive(
+  host: host,
+  port: port,
+  username: username,
+  responses: responses,
+  jump: jump,
+  localAddr: localAddr,
+  localPort: localPort,
+);
+
+Future<BigInt> openRemoteForwardPubkey({
+  required String host,
+  required int port,
+  required String username,
+  required String privateKeyPath,
+  String? passphrase,
+  required JumpHost jump,
+  required String remoteAddr,
+  required int remotePort,
+  required String localHost,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenRemoteForwardPubkey(
+  host: host,
+  port: port,
+  username: username,
+  privateKeyPath: privateKeyPath,
+  passphrase: passphrase,
+  jump: jump,
+  remoteAddr: remoteAddr,
+  remotePort: remotePort,
+  localHost: localHost,
+  localPort: localPort,
+);
+
+Future<BigInt> openRemoteForwardAgent({
+  required String host,
+  required int port,
+  required String username,
+  required JumpHost jump,
+  required String remoteAddr,
+  required int remotePort,
+  required String localHost,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenRemoteForwardAgent(
+  host: host,
+  port: port,
+  username: username,
+  jump: jump,
+  remoteAddr: remoteAddr,
+  remotePort: remotePort,
+  localHost: localHost,
+  localPort: localPort,
+);
+
+Future<BigInt> openRemoteForwardPassword({
+  required String host,
+  required int port,
+  required String username,
+  required String password,
+  required JumpHost jump,
+  required String remoteAddr,
+  required int remotePort,
+  required String localHost,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenRemoteForwardPassword(
+  host: host,
+  port: port,
+  username: username,
+  password: password,
+  jump: jump,
+  remoteAddr: remoteAddr,
+  remotePort: remotePort,
+  localHost: localHost,
+  localPort: localPort,
+);
+
+Future<BigInt> openRemoteForwardKeyboardInteractive({
+  required String host,
+  required int port,
+  required String username,
+  required List<String> responses,
+  required JumpHost jump,
+  required String remoteAddr,
+  required int remotePort,
+  required String localHost,
+  required int localPort,
+}) => RustLib.instance.api.crateApiForwardOpenRemoteForwardKeyboardInteractive(
+  host: host,
+  port: port,
+  username: username,
+  responses: responses,
+  jump: jump,
+  remoteAddr: remoteAddr,
+  remotePort: remotePort,
+  localHost: localHost,
+  localPort: localPort,
+);
+
 Future<BigInt> openLocalForwardPubkey({
   required String host,
   required int port,
@@ -53,6 +213,50 @@ Future<BigInt> openLocalForwardAgent({
   remotePort: remotePort,
 );
 
+Future<BigInt> openLocalForwardPassword({
+  required String host,
+  required int port,
+  required String username,
+  required String password,
+  required JumpHost jump,
+  required String localAddr,
+  required int localPort,
+  required String remoteHost,
+  required int remotePort,
+}) => RustLib.instance.api.crateApiForwardOpenLocalForwardPassword(
+  host: host,
+  port: port,
+  username: username,
+  password: password,
+  jump: jump,
+  localAddr: localAddr,
+  localPort: localPort,
+  remoteHost: remoteHost,
+  remotePort: remotePort,
+);
+
+Future<BigInt> openLocalForwardKeyboardInteractive({
+  required String host,
+  required int port,
+  required String username,
+  required List<String> responses,
+  required JumpHost jump,
+  required String localAddr,
+  required int localPort,
+  required String remoteHost,
+  required int remotePort,
+}) => RustLib.instance.api.crateApiForwardOpenLocalForwardKeyboardInteractive(
+  host: host,
+  port: port,
+  username: username,
+  responses: responses,
+  jump: jump,
+  localAddr: localAddr,
+  localPort: localPort,
+  remoteHost: remoteHost,
+  remotePort: remotePort,
+);
+
 Future<List<PortForward>> listForwards() =>
     RustLib.instance.api.crateApiForwardListForwards();
 
@@ -61,6 +265,7 @@ Future<void> stopForward({required BigInt id}) =>
 
 class PortForward {
   final BigInt id;
+  final String kind;
   final String localAddr;
   final int localPort;
   final String remoteHost;
@@ -68,6 +273,7 @@ class PortForward {
 
   const PortForward({
     required this.id,
+    required this.kind,
     required this.localAddr,
     required this.localPort,
     required this.remoteHost,
@@ -77,6 +283,7 @@ class PortForward {
   @override
   int get hashCode =>
       id.hashCode ^
+      kind.hashCode ^
       localAddr.hashCode ^
       localPort.hashCode ^
       remoteHost.hashCode ^
@@ -88,6 +295,7 @@ class PortForward {
       other is PortForward &&
           runtimeType == other.runtimeType &&
           id == other.id &&
+          kind == other.kind &&
           localAddr == other.localAddr &&
           localPort == other.localPort &&
           remoteHost == other.remoteHost &&

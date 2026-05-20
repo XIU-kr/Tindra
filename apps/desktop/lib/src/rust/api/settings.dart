@@ -14,12 +14,33 @@ Future<Settings> loadSettings() =>
 Future<void> saveSettings({required Settings settings}) =>
     RustLib.instance.api.crateApiSettingsSaveSettings(settings: settings);
 
+Future<String> settingsPath() =>
+    RustLib.instance.api.crateApiSettingsSettingsPath();
+
+Future<String> expectedLogDir() =>
+    RustLib.instance.api.crateApiSettingsExpectedLogDir();
+
+Future<String> secretBackend() =>
+    RustLib.instance.api.crateApiSettingsSecretBackend();
+
+Future<void> saveSecret({required String name, required String secret}) =>
+    RustLib.instance.api.crateApiSettingsSaveSecret(name: name, secret: secret);
+
+Future<String?> loadSecret({required String name}) =>
+    RustLib.instance.api.crateApiSettingsLoadSecret(name: name);
+
+Future<void> deleteSecret({required String name}) =>
+    RustLib.instance.api.crateApiSettingsDeleteSecret(name: name);
+
 class Settings {
   final String theme;
   final String fontFamily;
   final double fontSize;
   final String quakeHotkey;
   final String locale;
+  final String localShell;
+  final String localShellCwd;
+  final String localShellEnv;
 
   const Settings({
     required this.theme,
@@ -27,6 +48,9 @@ class Settings {
     required this.fontSize,
     required this.quakeHotkey,
     required this.locale,
+    required this.localShell,
+    required this.localShellCwd,
+    required this.localShellEnv,
   });
 
   @override
@@ -35,7 +59,10 @@ class Settings {
       fontFamily.hashCode ^
       fontSize.hashCode ^
       quakeHotkey.hashCode ^
-      locale.hashCode;
+      locale.hashCode ^
+      localShell.hashCode ^
+      localShellCwd.hashCode ^
+      localShellEnv.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -46,5 +73,8 @@ class Settings {
           fontFamily == other.fontFamily &&
           fontSize == other.fontSize &&
           quakeHotkey == other.quakeHotkey &&
-          locale == other.locale;
+          locale == other.locale &&
+          localShell == other.localShell &&
+          localShellCwd == other.localShellCwd &&
+          localShellEnv == other.localShellEnv;
 }

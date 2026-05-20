@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
+﻿// SPDX-License-Identifier: Apache-2.0
 //
-// Phase 0 smoke test. Verifies the full Rust → flutter_rust_bridge → Dart
-// round-trip works on every target platform before any real work is done.
-//
-// To remove once Phase 1 starts.
+// Tiny diagnostics surface for FRB health checks and version display.
+// Kept as a tiny diagnostics surface for bridge health checks and version display.
 
 use flutter_rust_bridge::frb;
 

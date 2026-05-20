@@ -1,70 +1,68 @@
 # Tindra
 
-Modern cross-platform SSH client. A spiritual successor to Tabby (formerly Terminus) that also runs on Android and iOS, with end-to-end encrypted device sync, AI/MCP integration, and a WASM plugin SDK.
+Modern cross-platform SSH client. Tindra is built with a Rust core and Flutter UI, with a desktop-first implementation and documented mobile/macOS preparation paths.
 
-> **Status:** Early development. Phase 0 — bootstrapping. Not yet usable.
+> **Status:** Desktop implementation is active and usable on Windows. The current app includes SSH shell sessions, explicit host-key approval, profile/settings storage, SFTP browsing and transfers, port forwarding, terminal search/scrollback, diagnostics, and Windows packaging verification. Android/macOS/iOS runners are prepared by scaffold checklists rather than generated in this tree yet.
 
 ## Why Tindra?
 
-Tabby is excellent on the desktop but doesn't run on mobile. Termius covers mobile but is closed-source. Tindra aims for the best of both:
+- **Desktop-first**, with Android and iOS planned as mobile companions.
+- **One codebase** across platforms: Rust core plus Flutter UI.
+- **Open source**: Apache-2.0 client, with AGPL-3.0 reserved for a future hosted sync backend.
+- **Modern essentials**: terminal tabs/splits, visual SFTP, jump hosts, host-key verification, and port-forwarding UI.
+- **Local-first storage**: JSON profile/settings storage, trusted host-key persistence, and OS-backed secret storage.
+- **AI/MCP and plugins**: crate boundaries and design documents are present for later product surfaces.
 
-- **Desktop-first**, with Android and iOS as first-class mobile companions.
-- **One codebase** across platforms — Rust core + Flutter UI.
-- **Open source** — Apache-2.0 client, AGPL-3.0 sync backend.
-- **Modern essentials** — GPU-accelerated terminal, visual SFTP, jump-host topology, port-forwarding UI.
-- **Optional cloud** — E2E-encrypted profile/key/snippet sync (paid plan); offline-only and BYO-cloud (iCloud/Drive folder) modes are always free.
-- **AI-native** — built-in AI assist with shell context and a [Model Context Protocol](https://modelcontextprotocol.io/) server/client.
-- **Plugins** — sandboxed WebAssembly plugin SDK with explicit permission grants.
+## Repository Layout
 
-## Repository layout
-
-```
+```text
 apps/
-  desktop/        Flutter app for macOS / Windows / Linux
-  mobile/         Flutter app for Android + iOS
-  shared_ui/      Shared widgets, themes, terminal renderer
+  desktop/        Flutter desktop app and current Windows runner
+  mobile/         Mobile scaffold notes and platform boundary docs
+  shared_ui/      Platform-neutral UI/workflow models
 core/             Rust workspace
   crates/
-    tindra-core   Public FFI surface
-    tindra-ssh    SSH transport (russh)
-    tindra-pty    PTY abstraction (portable-pty)
-    tindra-sftp   SFTP (russh-sftp)
-    tindra-term   VT parser + grid (alacritty_terminal)
-    tindra-store  Encrypted profile store (SQLCipher + age)
-    tindra-sync   E2E sync engine (CRDT + age)
-    tindra-mcp    Model Context Protocol server/client
-    tindra-ai     LLM provider abstraction (BYOK)
-    tindra-plug   Plugin host (wasmtime + WIT)
-bridge/           flutter_rust_bridge codegen
-plugins/
-  sdk/            Plugin SDK (WIT definitions, host ABI)
-  examples/       Sample plugins
-scripts/          Build/codegen helpers, toolchain setup
-docs/             Architecture, security model, plugin SDK
+    tindra-core   Shared Rust facade
+    tindra-ssh    SSH transport, shell sessions, forwarding, Telnet/raw TCP
+    tindra-pty    Local PTY abstraction
+    tindra-sftp   SFTP operations and progress hooks
+    tindra-term   Terminal parsing helpers
+    tindra-store  Profiles, settings, host keys, and OS-backed secrets
+    tindra-sync   Sync boundary crate
+    tindra-mcp    MCP boundary crate
+    tindra-ai     AI boundary crate
+    tindra-plug   Plugin boundary crate
+bridge/           Legacy/shared FRB config notes
+scripts/          Build and setup helpers
+docs/             Architecture, packaging, security, and execution notes
 ```
 
 ## Building
 
-- **Windows-only quickstart** (skip Android/iOS/Linux/macOS): [`scripts/SETUP-WINDOWS.md`](scripts/SETUP-WINDOWS.md)
+- **Windows quickstart**: [`scripts/SETUP-WINDOWS.md`](scripts/SETUP-WINDOWS.md)
 - **Full multi-platform setup**: [`scripts/SETUP.md`](scripts/SETUP.md)
 
-TL;DR you need Rust (stable), Flutter (stable), and a C++ toolchain. Android NDK and Xcode only when targeting those platforms.
+TL;DR you need Rust stable, Flutter stable, and the platform C++ toolchain. Android NDK and Xcode are only needed when targeting those platforms.
 
-```bash
-# After installing toolchains
-cd core && cargo build           # Rust core
-cd ../apps/desktop && flutter build  # Flutter desktop
+```powershell
+cd core
+cargo check
+
+cd ..\apps\desktop
+flutter analyze
+flutter test
+flutter build windows
 ```
 
-End-to-end build verification (5-platform matrix) runs in CI.
+Current local verification uses `cargo check`, `flutter analyze`, `flutter test`, and `flutter build windows`.
 
 ## License
 
-- Everything currently in this repository is licensed under **Apache-2.0** — see [`LICENSE-APACHE`](LICENSE-APACHE).
-- The forthcoming sync backend (planned for `core/crates/tindra-sync-server/` or a separate repository) will be licensed under **AGPL-3.0** to prevent SaaS forks. The canonical license text will be added when that code lands. See [`LICENSE-AGPL`](LICENSE-AGPL) for the placeholder.
+- Current client code is licensed under **Apache-2.0**. See [`LICENSE-APACHE`](LICENSE-APACHE).
+- A future hosted sync backend may use **AGPL-3.0**. See [`LICENSE-AGPL`](LICENSE-AGPL).
 
-By contributing you agree to license your contributions under the same terms (see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
+By contributing you agree to license your contributions under the same terms. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## Roadmap
+## Status
 
-See [`docs/architecture.md`](docs/architecture.md) for the phased roadmap.
+Current implementation status is tracked in [`docs/status.md`](docs/status.md).

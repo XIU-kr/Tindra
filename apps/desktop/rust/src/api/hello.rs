@@ -1,5 +1,5 @@
-// Phase 0 smoke test — forwards to tindra-core's api::hello.
-// To remove once Phase 1 starts and real session/profile APIs land.
+﻿// Desktop diagnostics bridge into tindra-core.
+// Kept as a small synchronous diagnostics API for tests and settings/about surfaces.
 
 use flutter_rust_bridge::frb;
 

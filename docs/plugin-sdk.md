@@ -1,57 +1,27 @@
 # Plugin SDK
 
-> **Status:** Stub. The WIT (WebAssembly Interface Types) ABI lands in Phase 6.
+The plugin SDK is a product boundary, not part of the current desktop completion path. The repository keeps the `tindra-plug` crate so the core layout remains stable while terminal, SFTP, forwarding, storage, and packaging work continue.
 
 ## Goals
 
-- Plugins shouldn't tank the host process if they crash or hang.
-- Plugins shouldn't be able to read terminal output unless granted.
-- Plugins should be language-agnostic (any language that can produce a WASM component works).
-- Distribution should be a single `.wasm` file plus a signed manifest.
+- Plugins should not crash or block the host process.
+- Plugins should not read terminal output unless granted.
+- Plugins should be language-agnostic once the runtime is introduced.
+- Distribution should use a signed manifest plus a plugin artifact.
 
-## Why WASM components?
+## Capability Model
 
-- Memory isolation by default.
-- Capability-based: nothing the host doesn't explicitly bind is reachable.
-- The component model gives us interface types, so plugins written in Rust/JS/Python can consume the same ABI.
+The intended model is default-deny:
 
-## Sketch
+- `terminal:read`
+- `terminal:write`
+- `profiles:read`
+- `profiles:write`
+- `network:host=<pattern>`
+- `filesystem:path=<path>`
 
-```wit
-package tindra:plugin@0.1.0;
+Capability prompts must include the plugin name, publisher identity, requested operation, and persistence scope.
 
-interface terminal {
-    read snapshot(session: u64) -> string;
-    write input(session: u64, data: string);
-    on prompt-completed(session: u64, command: string, exit-code: s32);
-}
+## Current Repository Boundary
 
-interface profiles {
-    list-readonly() -> list<string>;
-    /* mutating ops require profiles:write capability */
-}
-
-world tindra-plugin {
-    import terminal;
-    import profiles;
-    export init: func();
-    export name: func() -> string;
-}
-```
-
-## Permission manifest
-
-```json
-{
-  "name": "zsh-snippet",
-  "version": "0.1.0",
-  "publisher": "tindra-official",
-  "capabilities": [
-    "terminal:write",
-    "profiles:read"
-  ],
-  "exports": ["init", "show-snippet-picker"]
-}
-```
-
-(More to come.)
+`core/crates/tindra-plug` intentionally exposes a small placeholder API while the runtime is absent. It should remain isolated from the desktop terminal/SFTP/session code until a real WASM component host and permission UI are introduced.

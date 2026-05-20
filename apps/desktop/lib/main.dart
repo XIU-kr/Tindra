@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tindra desktop — editorial-tech UI.
+// Tindra desktop ??editorial-tech UI.
 //
 // Single-file Flutter shell that mirrors the Tindra Redesign prototype:
 // 36px title bar with traffic lights, 230px sidebar with six top-level views,
 // command palette (Cmd/Ctrl+K), and inline pages for Sessions, Profiles,
 // Files (SFTP), Forwards, Host keys and Settings. All Rust FFI session
-// management lives unchanged inside `_ShellScreenState` — only the
+// management lives unchanged inside `_ShellScreenState` ??only the
 // presentation layer was rewritten.
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -20,20 +24,49 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'package:tindra_desktop/l10n/app_localizations.dart';
+import 'package:tindra_desktop/src/session_status.dart';
+import 'package:tindra_shared_ui/tindra_shared_ui.dart';
 import 'package:tindra_desktop/src/rust/api/forward.dart' as rust;
+import 'package:tindra_desktop/src/rust/api/hello.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/settings.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/sftp.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/ssh.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
+part 'src/ui/typography.dart';
+part 'src/ui/design_tokens.dart';
+part 'src/ui/intents.dart';
+part 'src/ui/shell_chrome.dart';
+part 'src/session/session_pane.dart';
+part 'src/profiles/profile_views.dart';
+part 'src/files/sftp_view.dart';
+
 // ============================================================================
 // Startup
 // ============================================================================
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (args.length >= 3 && args[0] == 'multi_window') {
+    await windowManager.ensureInitialized();
+    await RustLib.init();
+    runApp(_DetachedNativeWindowApp(arguments: args[2]));
+    return;
+  }
   await windowManager.ensureInitialized();
+  await windowManager.waitUntilReadyToShow(
+    const WindowOptions(
+      title: 'Tindra',
+      titleBarStyle: TitleBarStyle.hidden,
+      windowButtonVisibility: false,
+      minimumSize: Size(960, 600),
+    ),
+    () async {
+      await windowManager.show();
+      await windowManager.focus();
+    },
+  );
   await hotKeyManager.unregisterAll();
   GoogleFonts.config.allowRuntimeFetching = true;
   await RustLib.init();
@@ -71,24 +104,36 @@ Future<void> _registerQuakeHotkey() async {
       },
     );
   } catch (_) {
-    // already taken — silent fall back
+    // already taken ??silent fall back
   }
 }
 
 LogicalKeyboardKey? _parseHotkey(String s) {
   switch (s.toUpperCase()) {
-    case 'F1': return LogicalKeyboardKey.f1;
-    case 'F2': return LogicalKeyboardKey.f2;
-    case 'F3': return LogicalKeyboardKey.f3;
-    case 'F4': return LogicalKeyboardKey.f4;
-    case 'F5': return LogicalKeyboardKey.f5;
-    case 'F6': return LogicalKeyboardKey.f6;
-    case 'F7': return LogicalKeyboardKey.f7;
-    case 'F8': return LogicalKeyboardKey.f8;
-    case 'F9': return LogicalKeyboardKey.f9;
-    case 'F10': return LogicalKeyboardKey.f10;
-    case 'F11': return LogicalKeyboardKey.f11;
-    case 'F12': return LogicalKeyboardKey.f12;
+    case 'F1':
+      return LogicalKeyboardKey.f1;
+    case 'F2':
+      return LogicalKeyboardKey.f2;
+    case 'F3':
+      return LogicalKeyboardKey.f3;
+    case 'F4':
+      return LogicalKeyboardKey.f4;
+    case 'F5':
+      return LogicalKeyboardKey.f5;
+    case 'F6':
+      return LogicalKeyboardKey.f6;
+    case 'F7':
+      return LogicalKeyboardKey.f7;
+    case 'F8':
+      return LogicalKeyboardKey.f8;
+    case 'F9':
+      return LogicalKeyboardKey.f9;
+    case 'F10':
+      return LogicalKeyboardKey.f10;
+    case 'F11':
+      return LogicalKeyboardKey.f11;
+    case 'F12':
+      return LogicalKeyboardKey.f12;
     case 'BACKQUOTE':
     case 'GRAVE':
     case '`':
@@ -106,6 +151,9 @@ final ValueNotifier<rust.Settings> appSettings = ValueNotifier(
     fontSize: 13.0,
     quakeHotkey: '',
     locale: 'system',
+    localShell: '',
+    localShellCwd: '',
+    localShellEnv: '',
   ),
 );
 
@@ -115,40 +163,173 @@ final ValueNotifier<String> appAccent = ValueNotifier('rose');
 /// Compact-density toggle.
 final ValueNotifier<bool> appDense = ValueNotifier(false);
 
+enum _TerminalCursorStyle { block, bar, underline }
+
+class _TerminalPrefs {
+  const _TerminalPrefs({
+    this.cursorStyle = _TerminalCursorStyle.block,
+    this.copyOnSelect = false,
+    this.scrollbackLimit = 1000,
+    this.warnOnLargePaste = true,
+  });
+
+  final _TerminalCursorStyle cursorStyle;
+  final bool copyOnSelect;
+  final int scrollbackLimit;
+  final bool warnOnLargePaste;
+
+  Map<String, dynamic> toJson() => {
+    'cursorStyle': cursorStyle.name,
+    'copyOnSelect': copyOnSelect,
+    'scrollbackLimit': scrollbackLimit,
+    'warnOnLargePaste': warnOnLargePaste,
+  };
+
+  factory _TerminalPrefs.fromJson(Map<String, dynamic>? json) {
+    final rawCursor = json?['cursorStyle'] as String?;
+    return _TerminalPrefs(
+      cursorStyle: _TerminalCursorStyle.values.firstWhere(
+        (style) => style.name == rawCursor,
+        orElse: () => _TerminalCursorStyle.block,
+      ),
+      copyOnSelect: json?['copyOnSelect'] == true,
+      scrollbackLimit: (json?['scrollbackLimit'] as int? ?? 1000).clamp(
+        100,
+        10000,
+      ),
+      warnOnLargePaste: json?['warnOnLargePaste'] != false,
+    );
+  }
+
+  _TerminalPrefs copyWith({
+    _TerminalCursorStyle? cursorStyle,
+    bool? copyOnSelect,
+    int? scrollbackLimit,
+    bool? warnOnLargePaste,
+  }) => _TerminalPrefs(
+    cursorStyle: cursorStyle ?? this.cursorStyle,
+    copyOnSelect: copyOnSelect ?? this.copyOnSelect,
+    scrollbackLimit: scrollbackLimit ?? this.scrollbackLimit,
+    warnOnLargePaste: warnOnLargePaste ?? this.warnOnLargePaste,
+  );
+}
+
+// ignore: library_private_types_in_public_api
+final ValueNotifier<_TerminalPrefs> terminalPrefs = ValueNotifier(
+  const _TerminalPrefs(),
+);
+
+const Map<String, String> _defaultShortcutBindings = {
+  'newTab': 'Ctrl+T',
+  'closeTab': 'Ctrl+W',
+  'nextTab': 'Ctrl+Tab',
+  'prevTab': 'Ctrl+Shift+Tab',
+  'palette': 'Ctrl+K',
+  'settings': 'Ctrl+,',
+  'splitRight': 'Ctrl+Shift+H',
+  'splitDown': 'Ctrl+Shift+E',
+  'copy': 'Ctrl+Shift+C',
+  'paste': 'Ctrl+Shift+V',
+  'reconnect': 'Ctrl+Shift+R',
+  'duplicateTab': 'Ctrl+Shift+D',
+  'closeOtherTabs': 'None',
+  'closeTabsToRight': 'None',
+  'prevPane': 'Alt+Left',
+  'nextPane': 'Alt+Right',
+  'maximizePane': 'Ctrl+Shift+M',
+  'moveTabLeft': 'Ctrl+Shift+Left',
+  'moveTabRight': 'Ctrl+Shift+Right',
+  'detachTab': 'Ctrl+Shift+O',
+  'pinTab': 'Ctrl+Shift+P',
+  'closePane': 'Ctrl+Shift+W',
+};
+
+const Map<String, String> _shortcutLabels = {
+  'newTab': 'New tab',
+  'closeTab': 'Close tab',
+  'nextTab': 'Next tab',
+  'prevTab': 'Previous tab',
+  'palette': 'Command palette',
+  'settings': 'Settings',
+  'splitRight': 'Split right',
+  'splitDown': 'Split down',
+  'copy': 'Copy',
+  'paste': 'Paste',
+  'reconnect': 'Reconnect',
+  'duplicateTab': 'Duplicate tab',
+  'closeOtherTabs': 'Close other tabs',
+  'closeTabsToRight': 'Close tabs to the right',
+  'prevPane': 'Previous pane',
+  'nextPane': 'Next pane',
+  'maximizePane': 'Maximize pane',
+  'moveTabLeft': 'Move tab left',
+  'moveTabRight': 'Move tab right',
+  'detachTab': 'Detach tab',
+  'pinTab': 'Pin tab',
+  'closePane': 'Close pane',
+};
+
+class _ShortcutPrefs {
+  const _ShortcutPrefs({this.bindings = _defaultShortcutBindings});
+
+  final Map<String, String> bindings;
+
+  String bindingFor(String action) =>
+      bindings[action] ?? _defaultShortcutBindings[action] ?? 'None';
+
+  Map<String, dynamic> toJson() => {'bindings': bindings};
+
+  factory _ShortcutPrefs.fromJson(Map<String, dynamic>? json) {
+    final raw = json?['bindings'] as Map<String, dynamic>? ?? const {};
+    return _ShortcutPrefs(
+      bindings: {
+        ..._defaultShortcutBindings,
+        for (final entry in raw.entries)
+          if (entry.value is String) entry.key: entry.value as String,
+      },
+    );
+  }
+}
+
+// ignore: library_private_types_in_public_api
+final ValueNotifier<_ShortcutPrefs> shortcutPrefs = ValueNotifier(
+  const _ShortcutPrefs(),
+);
+
 // ============================================================================
-// Design tokens — warm-leaning neutrals + single-chroma accent rotation
+// Design tokens ??warm-leaning neutrals + single-chroma accent rotation
 // ============================================================================
 
 class _Pal {
   // Dark
-  static const dBg0 = Color(0xFF15130F);
-  static const dBg1 = Color(0xFF1A1814);
-  static const dBg2 = Color(0xFF211E19);
-  static const dBg3 = Color(0xFF2A2620);
-  static const dLine = Color(0xFF2F2A23);
-  static const dLine2 = Color(0xFF3A342C);
-  static const dInk0 = Color(0xFFF7F3EC);
-  static const dInk1 = Color(0xFFD4CDBF);
-  static const dInk2 = Color(0xFF948B7C);
-  static const dInk3 = Color(0xFF6A6358);
-  static const dTBg = Color(0xFF16140F);
-  static const dTFg = Color(0xFFE6DFD1);
+  static const dBg0 = Color(0xFF101214);
+  static const dBg1 = Color(0xFF16191D);
+  static const dBg2 = Color(0xFF1D2228);
+  static const dBg3 = Color(0xFF252B33);
+  static const dLine = Color(0xFF2B323B);
+  static const dLine2 = Color(0xFF3A4450);
+  static const dInk0 = Color(0xFFF2F5F7);
+  static const dInk1 = Color(0xFFC9D1D9);
+  static const dInk2 = Color(0xFF8B98A6);
+  static const dInk3 = Color(0xFF64707D);
+  static const dTBg = Color(0xFF0C0F12);
+  static const dTFg = Color(0xFFE6EDF3);
 
   // Light
-  static const lBg0 = Color(0xFFF3EFE7);
-  static const lBg1 = Color(0xFFFAF6EE);
+  static const lBg0 = Color(0xFFF4F6F8);
+  static const lBg1 = Color(0xFFFFFFFF);
   static const lBg2 = Color(0xFFFFFFFF);
-  static const lBg3 = Color(0xFFF0EBE0);
-  static const lLine = Color(0xFFE2DCCF);
-  static const lLine2 = Color(0xFFD4CDBE);
-  static const lInk0 = Color(0xFF1A1814);
-  static const lInk1 = Color(0xFF3B362D);
-  static const lInk2 = Color(0xFF6C6557);
-  static const lInk3 = Color(0xFF908976);
-  static const lTBg = Color(0xFFF8F4EC);
-  static const lTFg = Color(0xFF2A2620);
+  static const lBg3 = Color(0xFFEAEFF4);
+  static const lLine = Color(0xFFDCE3EA);
+  static const lLine2 = Color(0xFFC7D0DA);
+  static const lInk0 = Color(0xFF15191E);
+  static const lInk1 = Color(0xFF303842);
+  static const lInk2 = Color(0xFF637181);
+  static const lInk3 = Color(0xFF8A96A3);
+  static const lTBg = Color(0xFFFBFCFD);
+  static const lTFg = Color(0xFF15191E);
 
-  // Accents — rotated by [appAccent]
+  // Accents ??rotated by [appAccent]
   static const cRose = Color(0xFFE3667D);
   static const cAmber = Color(0xFFD99A3A);
   static const cEmerald = Color(0xFF4CAF86);
@@ -174,11 +355,16 @@ Color get _tFg => _isLight ? _Pal.lTFg : _Pal.dTFg;
 
 Color colorForAccent(String name) {
   switch (name) {
-    case 'amber': return _Pal.cAmber;
-    case 'emerald': return _Pal.cEmerald;
-    case 'sky': return _Pal.cSky;
-    case 'violet': return _Pal.cViolet;
-    case 'slate': return _Pal.cSlate;
+    case 'amber':
+      return _Pal.cAmber;
+    case 'emerald':
+      return _Pal.cEmerald;
+    case 'sky':
+      return _Pal.cSky;
+    case 'violet':
+      return _Pal.cViolet;
+    case 'slate':
+      return _Pal.cSlate;
     case 'rose':
     default:
       return _Pal.cRose;
@@ -188,86 +374,6 @@ Color colorForAccent(String name) {
 Color get _acc => colorForAccent(appAccent.value);
 Color get _accSoft => _acc.withValues(alpha: 0.18);
 Color get _accDeep => Color.lerp(_acc, _Pal.dBg1, 0.4)!;
-
-// ============================================================================
-// Typography helpers
-// ============================================================================
-
-TextStyle _display({double size = 36, FontWeight weight = FontWeight.w500, Color? color, double letterSpacing = -0.5}) {
-  return GoogleFonts.fraunces(
-    fontSize: size,
-    fontWeight: weight,
-    height: 1.05,
-    letterSpacing: letterSpacing,
-    color: color ?? _ink0,
-  );
-}
-
-TextStyle _sans({double size = 13.5, FontWeight weight = FontWeight.w400, Color? color, double letterSpacing = -0.05}) {
-  return GoogleFonts.inter(
-    fontSize: size,
-    fontWeight: weight,
-    height: 1.4,
-    letterSpacing: letterSpacing,
-    color: color ?? _ink0,
-  );
-}
-
-TextStyle _mono({double size = 12, FontWeight weight = FontWeight.w400, Color? color, double letterSpacing = 0}) {
-  return GoogleFonts.jetBrainsMono(
-    fontSize: size,
-    fontWeight: weight,
-    height: 1.4,
-    letterSpacing: letterSpacing,
-    color: color ?? _ink1,
-  );
-}
-
-TextStyle _eyebrow() => _mono(
-      size: 10.5,
-      weight: FontWeight.w500,
-      color: _acc,
-      letterSpacing: 1.5,
-    );
-
-TextStyle _blockHead() => _mono(
-      size: 11,
-      weight: FontWeight.w500,
-      color: _ink1,
-      letterSpacing: 1.6,
-    );
-
-TextStyle _blockSub() => _mono(
-      size: 11,
-      color: _ink3,
-      letterSpacing: 0.4,
-    );
-
-TextStyle get _termStyle {
-  final fam = appSettings.value.fontFamily;
-  final size = appSettings.value.fontSize <= 0 ? 13.0 : appSettings.value.fontSize;
-  if (fam.isEmpty || fam.toLowerCase().contains('jetbrains')) {
-    return GoogleFonts.jetBrainsMono(
-      fontSize: size,
-      height: 1.55,
-      color: _tFg,
-    );
-  }
-  return TextStyle(
-    fontFamily: fam,
-    fontFamilyFallback: const [
-      'JetBrains Mono',
-      'Cascadia Mono',
-      'Consolas',
-      'Malgun Gothic',
-      'Noto Sans Mono CJK KR',
-      'Courier New',
-    ],
-    fontSize: size,
-    height: 1.55,
-    color: _tFg,
-  );
-}
 
 // ============================================================================
 // App
@@ -287,7 +393,7 @@ class TindraApp extends StatelessWidget {
             ? ThemeData.light(useMaterial3: true)
             : ThemeData.dark(useMaterial3: true);
         return MaterialApp(
-          title: 'Tindra',
+          onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
           debugShowCheckedModeBanner: false,
           locale: settings.locale == 'system' ? null : Locale(settings.locale),
           supportedLocales: AppLocalizations.supportedLocales,
@@ -314,10 +420,9 @@ class TindraApp extends StatelessWidget {
                     onSurface: _Pal.dInk0,
                     error: _Pal.cRose,
                   ),
-            textTheme: GoogleFonts.interTextTheme(base.textTheme).apply(
-              bodyColor: _ink0,
-              displayColor: _ink0,
-            ),
+            textTheme: GoogleFonts.interTextTheme(
+              base.textTheme,
+            ).apply(bodyColor: _ink0, displayColor: _ink0),
             iconTheme: IconThemeData(color: _ink2, size: 16),
             dividerColor: _line,
             inputDecorationTheme: InputDecorationTheme(
@@ -336,7 +441,10 @@ class TindraApp extends StatelessWidget {
                 borderSide: BorderSide(color: _acc, width: 1.4),
               ),
               hintStyle: _mono(size: 12.5, color: _ink3),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 11,
+              ),
             ),
             tooltipTheme: TooltipThemeData(
               decoration: BoxDecoration(
@@ -353,7 +461,11 @@ class TindraApp extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
                 side: BorderSide(color: _line2),
               ),
-              titleTextStyle: _display(size: 22, weight: FontWeight.w500, color: _ink0),
+              titleTextStyle: _display(
+                size: 22,
+                weight: FontWeight.w500,
+                color: _ink0,
+              ),
             ),
           ),
           home: const ShellScreen(),
@@ -373,10 +485,14 @@ const String _localShellProfileId = '__local_shell__';
 
 /// One live (or recently-live) SSH session.
 class _SessionTab {
-  _SessionTab({required this.profileId, required this.profileName});
+  _SessionTab({required this.profileId, required this.profileName})
+    : displayName = profileName;
 
   final String profileId;
   final String profileName;
+  String displayName;
+  Color? tabColor;
+  bool pinned = false;
 
   BigInt? sessionId;
   _ConnState state = _ConnState.connecting;
@@ -384,10 +500,19 @@ class _SessionTab {
   StreamSubscription<rust.TerminalSnapshot>? outputSub;
   String? error;
   DateTime startedAt = DateTime.now();
+  DateTime lastActivityAt = DateTime.now();
+  bool hasUnreadActivity = false;
+  bool hasBellActivity = false;
+  String? selectedTerminalText;
 
   int cols = 120;
   int rows = 32;
   Timer? resizeDebounce;
+  String terminalSearchQuery = '';
+  int terminalSearchIndex = 0;
+  bool terminalSearchCaseSensitive = false;
+  bool terminalSearchWholeWord = false;
+  bool terminalSearchRegex = false;
 
   Future<void> dispose() async {
     resizeDebounce?.cancel();
@@ -405,17 +530,35 @@ class _SessionTab {
 }
 
 class _TabGroup {
-  _TabGroup({
-    required this.profileName,
-    required _SessionTab first,
-  }) : sessions = [first];
+  _TabGroup({required this.profileName, required _SessionTab first})
+    : sessions = [first],
+      splitWeights = [1.0];
 
-  final String profileName;
+  String profileName;
+  bool pinned = false;
+  Color? tabColor;
   final List<_SessionTab> sessions;
+  final List<double> splitWeights;
   Axis splitAxis = Axis.horizontal;
   int activeIdx = 0;
+  int? maximizedIdx;
 
   _SessionTab get active => sessions[activeIdx.clamp(0, sessions.length - 1)];
+
+  String get displayName => active.displayName;
+
+  void normalizeWeights() {
+    while (splitWeights.length < sessions.length) {
+      splitWeights.add(1.0);
+    }
+    while (splitWeights.length > sessions.length) {
+      splitWeights.removeLast();
+    }
+    if (maximizedIdx != null &&
+        (maximizedIdx! < 0 || maximizedIdx! >= sessions.length)) {
+      maximizedIdx = null;
+    }
+  }
 
   Future<void> dispose() async {
     for (final s in sessions) {
@@ -424,7 +567,576 @@ class _TabGroup {
   }
 }
 
+class _DesktopState {
+  const _DesktopState({
+    this.quickConnectHistory = const [],
+    this.quickConnectFavorites = const [],
+    this.lastProfileIds = const [],
+    this.lastLayoutGroups = const [],
+    this.sidebarCollapsed = false,
+    this.terminalPrefs = const _TerminalPrefs(),
+    this.shortcutPrefs = const _ShortcutPrefs(),
+  });
+
+  final List<String> quickConnectHistory;
+  final List<String> quickConnectFavorites;
+  final List<String> lastProfileIds;
+  final List<_SavedLayoutGroup> lastLayoutGroups;
+  final bool sidebarCollapsed;
+  final _TerminalPrefs terminalPrefs;
+  final _ShortcutPrefs shortcutPrefs;
+
+  Map<String, dynamic> toJson() => {
+    'quickConnectHistory': quickConnectHistory,
+    'quickConnectFavorites': quickConnectFavorites,
+    'lastProfileIds': lastProfileIds,
+    'lastLayoutGroups': [for (final group in lastLayoutGroups) group.toJson()],
+    'sidebarCollapsed': sidebarCollapsed,
+    'terminalPrefs': terminalPrefs.toJson(),
+    'shortcutPrefs': shortcutPrefs.toJson(),
+  };
+
+  factory _DesktopState.fromJson(Map<String, dynamic> json) => _DesktopState(
+    quickConnectHistory:
+        (json['quickConnectHistory'] as List<dynamic>? ?? const [])
+            .whereType<String>()
+            .toList(),
+    quickConnectFavorites:
+        (json['quickConnectFavorites'] as List<dynamic>? ?? const [])
+            .whereType<String>()
+            .toList(),
+    lastProfileIds: (json['lastProfileIds'] as List<dynamic>? ?? const [])
+        .whereType<String>()
+        .toList(),
+    lastLayoutGroups: [
+      for (final item
+          in (json['lastLayoutGroups'] as List<dynamic>? ?? const []))
+        if (item is Map<String, dynamic>) _SavedLayoutGroup.fromJson(item),
+    ],
+    sidebarCollapsed: json['sidebarCollapsed'] == true,
+    terminalPrefs: _TerminalPrefs.fromJson(
+      json['terminalPrefs'] as Map<String, dynamic>?,
+    ),
+    shortcutPrefs: _ShortcutPrefs.fromJson(
+      json['shortcutPrefs'] as Map<String, dynamic>?,
+    ),
+  );
+}
+
+class _SavedLayoutGroup {
+  const _SavedLayoutGroup({
+    required this.profileIds,
+    required this.splitAxis,
+    required this.splitWeights,
+    required this.activeIdx,
+    required this.maximizedIdx,
+    required this.displayName,
+    required this.pinned,
+    required this.tabColor,
+  });
+
+  final List<String> profileIds;
+  final Axis splitAxis;
+  final List<double> splitWeights;
+  final int activeIdx;
+  final int? maximizedIdx;
+  final String displayName;
+  final bool pinned;
+  final Color? tabColor;
+
+  Map<String, dynamic> toJson() => {
+    'profileIds': profileIds,
+    'splitAxis': splitAxis == Axis.horizontal ? 'horizontal' : 'vertical',
+    'splitWeights': splitWeights,
+    'activeIdx': activeIdx,
+    'maximizedIdx': maximizedIdx,
+    'displayName': displayName,
+    'pinned': pinned,
+    'tabColor': tabColor?.toARGB32(),
+  };
+
+  factory _SavedLayoutGroup.fromJson(Map<String, dynamic> json) {
+    return _SavedLayoutGroup(
+      profileIds: (json['profileIds'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(),
+      splitAxis: json['splitAxis'] == 'vertical'
+          ? Axis.vertical
+          : Axis.horizontal,
+      splitWeights: [
+        for (final value
+            in (json['splitWeights'] as List<dynamic>? ?? const []))
+          if (value is num) value.toDouble(),
+      ],
+      activeIdx: json['activeIdx'] as int? ?? 0,
+      maximizedIdx: json['maximizedIdx'] as int?,
+      displayName: json['displayName'] as String? ?? '',
+      pinned: json['pinned'] == true,
+      tabColor: switch (json['tabColor']) {
+        final int value => Color(value),
+        _ => null,
+      },
+    );
+  }
+
+  static _SavedLayoutGroup? fromGroup(_TabGroup group) {
+    final ids = [
+      for (final session in group.sessions)
+        if (session.profileId != _localShellProfileId) session.profileId,
+    ];
+    if (ids.isEmpty) return null;
+    return _SavedLayoutGroup(
+      profileIds: ids,
+      splitAxis: group.splitAxis,
+      splitWeights: group.splitWeights.take(ids.length).toList(),
+      activeIdx: group.activeIdx.clamp(0, ids.length - 1),
+      maximizedIdx: group.maximizedIdx,
+      displayName: group.displayName,
+      pinned: group.pinned,
+      tabColor: group.tabColor,
+    );
+  }
+}
+
+class _TabDragPayload {
+  const _TabDragPayload(this.index);
+  final int index;
+}
+
+class _DetachedTabGroup {
+  _DetachedTabGroup({
+    required this.group,
+    required this.offset,
+    required this.size,
+  });
+
+  final _TabGroup group;
+  Offset offset;
+  Size size;
+}
+
+class _NativeDetachedSessionArgs {
+  const _NativeDetachedSessionArgs({
+    required this.profileName,
+    required this.splitAxis,
+    required this.sessions,
+  });
+
+  final String profileName;
+  final Axis splitAxis;
+  final List<_NativeDetachedSessionInfo> sessions;
+
+  String toJson() => jsonEncode({
+    'type': 'detached-session',
+    'profileName': profileName,
+    'splitAxis': splitAxis == Axis.horizontal ? 'horizontal' : 'vertical',
+    'sessions': [for (final session in sessions) session.toJson()],
+  });
+
+  factory _NativeDetachedSessionArgs.fromJson(String raw) {
+    final map = jsonDecode(raw) as Map<String, dynamic>;
+    return _NativeDetachedSessionArgs(
+      profileName: map['profileName'] as String? ?? 'Tindra',
+      splitAxis: map['splitAxis'] == 'vertical'
+          ? Axis.vertical
+          : Axis.horizontal,
+      sessions: [
+        for (final item in (map['sessions'] as List<dynamic>? ?? const []))
+          _NativeDetachedSessionInfo.fromJson(item as Map<String, dynamic>),
+      ],
+    );
+  }
+}
+
+class _NativeDetachedSessionInfo {
+  const _NativeDetachedSessionInfo({
+    required this.sessionId,
+    required this.profileId,
+    required this.profileName,
+    required this.cols,
+    required this.rows,
+  });
+
+  final BigInt sessionId;
+  final String profileId;
+  final String profileName;
+  final int cols;
+  final int rows;
+
+  Map<String, dynamic> toJson() => {
+    'sessionId': sessionId.toString(),
+    'profileId': profileId,
+    'profileName': profileName,
+    'cols': cols,
+    'rows': rows,
+  };
+
+  factory _NativeDetachedSessionInfo.fromJson(Map<String, dynamic> map) {
+    return _NativeDetachedSessionInfo(
+      sessionId: BigInt.parse(map['sessionId'] as String),
+      profileId: map['profileId'] as String? ?? '',
+      profileName: map['profileName'] as String? ?? 'Session',
+      cols: map['cols'] as int? ?? 80,
+      rows: map['rows'] as int? ?? 24,
+    );
+  }
+}
+
 enum _View { sessions, profiles, files, forwards, keys, settings }
+
+@visibleForTesting
+bool shouldShowPrivateKeyFieldForAuthMethod(String authMethod) =>
+    authMethod == 'key';
+
+@visibleForTesting
+class HostKeyDecisionDetails extends StatelessWidget {
+  const HostKeyDecisionDetails({
+    super.key,
+    required this.host,
+    required this.port,
+    required this.status,
+    required this.actual,
+    this.expected = '',
+  });
+
+  final String host;
+  final int port;
+  final String status;
+  final String actual;
+  final String expected;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final text = status == 'changed'
+        ? l10n.hostKeyChangedContent(actual, expected, host, port)
+        : l10n.trustHostKeyContent(actual, host, port);
+    return SelectableText(text);
+  }
+}
+
+class _DetachedNativeWindowApp extends StatelessWidget {
+  const _DetachedNativeWindowApp({required this.arguments});
+
+  final String arguments;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark(useMaterial3: true),
+      home: _DetachedNativeShell(arguments: arguments),
+    );
+  }
+}
+
+class _DetachedNativeShell extends StatefulWidget {
+  const _DetachedNativeShell({required this.arguments});
+
+  final String arguments;
+
+  @override
+  State<_DetachedNativeShell> createState() => _DetachedNativeShellState();
+}
+
+class _DetachedNativeShellState extends State<_DetachedNativeShell> {
+  final FocusNode _focus = FocusNode(debugLabel: 'detached-terminal');
+  late _NativeDetachedSessionArgs _args;
+  final List<_SessionTab> _sessions = [];
+  int _activeIdx = 0;
+  bool _reattaching = false;
+
+  _SessionTab? get _active => _sessions.isEmpty
+      ? null
+      : _sessions[_activeIdx.clamp(0, _sessions.length - 1)];
+
+  void _applyTerminalSnapshot(_SessionTab tab, rust.TerminalSnapshot snapshot) {
+    tab.snapshot = snapshot;
+    tab.lastActivityAt = DateTime.now();
+    if (snapshot.bell) {
+      if (_active != tab) tab.hasBellActivity = true;
+      unawaited(SystemSound.play(SystemSoundType.alert));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _args = _NativeDetachedSessionArgs.fromJson(widget.arguments);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await windowManager.setTitle('${_args.profileName} - Tindra');
+      _focus.requestFocus();
+    });
+    for (final info in _args.sessions) {
+      final tab =
+          _SessionTab(profileId: info.profileId, profileName: info.profileName)
+            ..sessionId = info.sessionId
+            ..cols = info.cols
+            ..rows = info.rows
+            ..state = _ConnState.connected;
+      tab.outputSub = rust
+          .shellOutputStream(sessionId: info.sessionId)
+          .listen(
+            (snapshot) {
+              _applyTerminalSnapshot(tab, snapshot);
+              if (mounted) setState(() {});
+            },
+            onError: (e) {
+              tab.error = e.toString();
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+            onDone: () {
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+          );
+      _sessions.add(tab);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final tab in _sessions) {
+      if (_reattaching) tab.sessionId = null;
+      tab.dispose();
+    }
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _writeBytes(List<int> data) async {
+    final id = _active?.sessionId;
+    if (id == null) return;
+    await rust.shellWrite(sessionId: id, data: data);
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final bytes = <int>[];
+    if (key == LogicalKeyboardKey.enter) {
+      bytes.add(13);
+    } else if (key == LogicalKeyboardKey.backspace) {
+      bytes.add(127);
+    } else if (key == LogicalKeyboardKey.tab) {
+      bytes.add(9);
+    } else if (key == LogicalKeyboardKey.escape) {
+      bytes.add(27);
+    } else if (key == LogicalKeyboardKey.arrowUp) {
+      bytes.addAll(const [27, 91, 65]);
+    } else if (key == LogicalKeyboardKey.arrowDown) {
+      bytes.addAll(const [27, 91, 66]);
+    } else if (key == LogicalKeyboardKey.arrowRight) {
+      bytes.addAll(const [27, 91, 67]);
+    } else if (key == LogicalKeyboardKey.arrowLeft) {
+      bytes.addAll(const [27, 91, 68]);
+    } else if (event.character != null && event.character!.isNotEmpty) {
+      bytes.addAll(utf8.encode(event.character!));
+    }
+    if (bytes.isEmpty) return KeyEventResult.ignored;
+    _writeBytes(bytes);
+    return KeyEventResult.handled;
+  }
+
+  Future<void> _setScrollback(_SessionTab tab, int rows) async {
+    final id = tab.sessionId;
+    if (id == null) return;
+    final snapshot = await rust.shellSetScrollback(
+      sessionId: id,
+      rows: rows.clamp(0, terminalPrefs.value.scrollbackLimit),
+    );
+    if (!mounted) return;
+    setState(() => tab.snapshot = snapshot);
+  }
+
+  Future<void> _attachToMainWindow() async {
+    _reattaching = true;
+    final args = _NativeDetachedSessionArgs(
+      profileName: _args.profileName,
+      splitAxis: _args.splitAxis,
+      sessions: [
+        for (final tab in _sessions)
+          if (tab.sessionId != null)
+            _NativeDetachedSessionInfo(
+              sessionId: tab.sessionId!,
+              profileId: tab.profileId,
+              profileName: tab.displayName,
+              cols: tab.cols,
+              rows: tab.rows,
+            ),
+      ],
+    );
+    const channel = WindowMethodChannel(
+      'tindra/session-windows',
+      mode: ChannelMode.unidirectional,
+    );
+    await channel.invokeMethod('reattach-session', args.toJson());
+    for (final tab in _sessions) {
+      tab.sessionId = null;
+    }
+    await windowManager.close();
+  }
+
+  void _scheduleResize(_SessionTab tab, int cols, int rows) {
+    if (cols == tab.cols && rows == tab.rows) return;
+    tab.resizeDebounce?.cancel();
+    tab.resizeDebounce = Timer(const Duration(milliseconds: 200), () {
+      final id = tab.sessionId;
+      if (id == null || tab.state != _ConnState.connected) return;
+      tab.cols = cols;
+      tab.rows = rows;
+      rust.shellResize(sessionId: id, cols: cols, rows: rows);
+    });
+  }
+
+  Widget _termBody(_SessionTab tab, bool focused) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final probe = TextPainter(
+          text: TextSpan(text: 'M', style: _termStyle),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final charWidth = probe.width;
+        final lineHeight = probe.height;
+        probe.dispose();
+
+        const padding = 14.0;
+        final fitCols = ((constraints.maxWidth - padding * 2) / charWidth)
+            .floor()
+            .clamp(20, 400);
+        final fitRows = ((constraints.maxHeight - padding * 2) / lineHeight)
+            .floor()
+            .clamp(8, 200);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scheduleResize(tab, fitCols, fitRows);
+        });
+
+        return Padding(
+          padding: const EdgeInsets.all(padding),
+          child: _CellGrid(
+            tab: tab,
+            isFocused: focused && _focus.hasFocus,
+            charWidth: charWidth,
+            lineHeight: lineHeight,
+            onReconnect: () async {},
+            onMouseReport: _writeBytes,
+            onScrollback: _setScrollback,
+            onCopy: () async {
+              final text = tab.selectedTerminalText ?? tab.snapshot?.text;
+              if (text != null && text.isNotEmpty) {
+                await Clipboard.setData(ClipboardData(text: text));
+              }
+            },
+            onPaste: () async {
+              final data = await Clipboard.getData('text/plain');
+              final text = data?.text;
+              if (text != null && text.isNotEmpty) {
+                await _writeBytes(utf8.encode(text));
+              }
+            },
+            onOpenUrl: _openDetachedUrl,
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openDetachedUrl(String url) async {
+    if (Platform.isWindows) {
+      await Process.run('rundll32', ['url.dll,FileProtocolHandler', url]);
+    } else if (Platform.isMacOS) {
+      await Process.run('open', [url]);
+    } else {
+      await Process.run('xdg-open', [url]);
+    }
+  }
+
+  Widget _content() {
+    if (_sessions.isEmpty) {
+      return Center(
+        child: Text('No session', style: _mono(size: 13, color: _ink2)),
+      );
+    }
+    if (_sessions.length == 1) {
+      return _termBody(_sessions.first, true);
+    }
+    final children = <Widget>[];
+    for (var i = 0; i < _sessions.length; i++) {
+      children.add(
+        Expanded(
+          child: GestureDetector(
+            onTap: () => setState(() => _activeIdx = i),
+            child: Container(
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                border: Border.all(color: i == _activeIdx ? _acc : _line),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: _termBody(_sessions[i], i == _activeIdx),
+            ),
+          ),
+        ),
+      );
+    }
+    return _args.splitAxis == Axis.horizontal
+        ? Row(children: children)
+        : Column(children: children);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _tBg,
+      body: Column(
+        children: [
+          Container(
+            height: 34,
+            color: _bg1,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Icon(Icons.open_in_new, size: 15, color: _ink3),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _args.profileName,
+                    overflow: TextOverflow.ellipsis,
+                    style: _mono(size: 12, color: _ink1),
+                  ),
+                ),
+                _IconBtn(
+                  icon: Icons.call_merge_outlined,
+                  tooltip: 'Attach to main tabs',
+                  onTap: _attachToMainWindow,
+                ),
+                _IconBtn(
+                  icon: Icons.close,
+                  tooltip: 'Close',
+                  onTap: () => windowManager.close(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Focus(
+              focusNode: _focus,
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _focus.requestFocus,
+                child: _content(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ============================================================================
 // Shell screen
@@ -438,6 +1150,11 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen> {
+  static const _sessionWindowChannel = WindowMethodChannel(
+    'tindra/session-windows',
+    mode: ChannelMode.unidirectional,
+  );
+
   final _passphrase = TextEditingController();
   final _termFocus = FocusNode(debugLabel: 'terminal');
 
@@ -448,12 +1165,18 @@ class _ShellScreenState extends State<ShellScreen> {
 
   // Tab state
   final List<_TabGroup> _tabs = [];
+  final List<_DetachedTabGroup> _detachedTabs = [];
   int _activeIdx = -1;
 
   // View routing
   _View _view = _View.sessions;
   bool _paletteOpen = false;
+  bool _sidebarCollapsed = false;
   String _profileFilter = 'all';
+  List<String> _quickConnectHistory = [];
+  List<String> _quickConnectFavorites = [];
+  List<String> _lastProfileIds = [];
+  List<_SavedLayoutGroup> _lastLayoutGroups = [];
 
   // ignore: unused_field
   String? _sidebarError;
@@ -469,10 +1192,86 @@ class _ShellScreenState extends State<ShellScreen> {
 
   _SessionTab? get _activeTab => _activeGroup?.active;
 
+  void _applyTerminalSnapshot(_SessionTab tab, rust.TerminalSnapshot snapshot) {
+    tab.snapshot = snapshot;
+    tab.lastActivityAt = DateTime.now();
+    if (_activeTab != tab) tab.hasUnreadActivity = true;
+    if (snapshot.bell) {
+      if (_activeTab != tab) tab.hasBellActivity = true;
+      unawaited(SystemSound.play(SystemSoundType.alert));
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _sessionWindowChannel.setMethodCallHandler((call) async {
+      if (call.method == 'reattach-session') {
+        final raw = call.arguments as String?;
+        if (raw != null) _reattachNativeSession(raw);
+        return true;
+      }
+      throw MissingPluginException('Unknown method ${call.method}');
+    });
+    _loadDesktopState();
     _refreshProfiles();
+  }
+
+  File get _desktopStateFile {
+    final base =
+        Platform.environment['APPDATA'] ??
+        Platform.environment['LOCALAPPDATA'] ??
+        Directory.current.path;
+    return File('$base\\Tindra\\desktop_state.json');
+  }
+
+  Future<void> _loadDesktopState() async {
+    try {
+      final file = _desktopStateFile;
+      if (!await file.exists()) return;
+      final state = _DesktopState.fromJson(
+        jsonDecode(await file.readAsString()) as Map<String, dynamic>,
+      );
+      if (!mounted) return;
+      terminalPrefs.value = state.terminalPrefs;
+      shortcutPrefs.value = state.shortcutPrefs;
+      setState(() {
+        _quickConnectHistory = state.quickConnectHistory.take(10).toList();
+        _quickConnectFavorites = state.quickConnectFavorites.take(20).toList();
+        _lastProfileIds = state.lastProfileIds.take(10).toList();
+        _lastLayoutGroups = state.lastLayoutGroups.take(10).toList();
+        _sidebarCollapsed = state.sidebarCollapsed;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveDesktopState() async {
+    try {
+      final file = _desktopStateFile;
+      await file.parent.create(recursive: true);
+      final lastProfileIds = [
+        for (final group in _tabs)
+          if (group.sessions.first.profileId != _localShellProfileId)
+            group.sessions.first.profileId,
+      ];
+      final layoutGroups = [
+        for (final group in _tabs)
+          if (_SavedLayoutGroup.fromGroup(group) != null)
+            _SavedLayoutGroup.fromGroup(group)!,
+      ];
+      _lastProfileIds = lastProfileIds;
+      _lastLayoutGroups = layoutGroups;
+      final state = _DesktopState(
+        quickConnectHistory: _quickConnectHistory.take(10).toList(),
+        quickConnectFavorites: _quickConnectFavorites.take(20).toList(),
+        lastProfileIds: lastProfileIds,
+        lastLayoutGroups: layoutGroups,
+        sidebarCollapsed: _sidebarCollapsed,
+        terminalPrefs: terminalPrefs.value,
+        shortcutPrefs: shortcutPrefs.value,
+      );
+      await file.writeAsString(jsonEncode(state.toJson()));
+    } catch (_) {}
   }
 
   // ---------------------- Profile CRUD ----------------------
@@ -519,7 +1318,10 @@ class _ShellScreenState extends State<ShellScreen> {
           title: Text(l10n.deleteProfileQuestion),
           content: Text(l10n.deleteProfileContent(profile.name)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l10n.cancel)),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l10n.cancel),
+            ),
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: _Pal.cRose),
               onPressed: () => Navigator.pop(ctx, true),
@@ -548,6 +1350,15 @@ class _ShellScreenState extends State<ShellScreen> {
   Future<void> _connectSelected({_TabGroup? splitInto, Axis? axis}) async {
     final p = _selectedProfile;
     if (p == null) return;
+    await _openProfileAsTab(p, splitInto: splitInto, axis: axis);
+  }
+
+  Future<void> _openProfileAsTab(
+    rust.Profile p, {
+    _TabGroup? splitInto,
+    Axis? axis,
+  }) async {
+    final l10n = AppLocalizations.of(context);
 
     final tab = _SessionTab(profileId: p.id, profileName: p.name);
     final group = splitInto;
@@ -555,6 +1366,8 @@ class _ShellScreenState extends State<ShellScreen> {
       if (group != null) {
         if (axis != null) group.splitAxis = axis;
         group.sessions.add(tab);
+        group.splitWeights.add(1.0);
+        group.normalizeWeights();
         group.activeIdx = group.sessions.length - 1;
       } else {
         _tabs.add(_TabGroup(profileName: p.name, first: tab));
@@ -562,8 +1375,18 @@ class _ShellScreenState extends State<ShellScreen> {
       }
       _view = _View.sessions;
     });
+    unawaited(_saveDesktopState());
 
     try {
+      if (p.transport != 'telnet') {
+        final ok = await _ensureTrustedProfileHostKey(p);
+        if (!ok) {
+          tab.error = l10n.hostKeyNotTrusted;
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+          return;
+        }
+      }
       final jump = rust.JumpHost(
         host: p.jumpHost,
         port: p.jumpPort == 0 ? 22 : p.jumpPort,
@@ -573,33 +1396,70 @@ class _ShellScreenState extends State<ShellScreen> {
       );
       final BigInt id;
       if (p.transport == 'telnet') {
-        id = await rust.openShellTelnet(host: p.host, port: p.port, cols: tab.cols, rows: tab.rows);
+        id = await rust.openShellTelnet(
+          host: p.host,
+          port: p.port,
+          cols: tab.cols,
+          rows: tab.rows,
+        );
       } else if (p.authMethod == 'agent') {
         id = await rust.openShellAgent(
-          host: p.host, port: p.port, username: p.username,
-          cols: tab.cols, rows: tab.rows, jump: jump,
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
         );
+      } else if (p.authMethod == 'password') {
+        final password = await _promptPassword(p);
+        if (password == null) {
+          tab.error = l10n.passwordRequired;
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+          return;
+        }
+        id = await rust.openShellPassword(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          password: password,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
+        );
+      } else if (p.authMethod == 'keyboard-interactive') {
+        id = await _openKeyboardInteractiveShell(p, tab, jump);
       } else {
         id = await rust.openShellPubkey(
-          host: p.host, port: p.port, username: p.username,
+          host: p.host,
+          port: p.port,
+          username: p.username,
           privateKeyPath: p.privateKeyPath,
           passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
-          cols: tab.cols, rows: tab.rows, jump: jump,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
         );
       }
       tab.sessionId = id;
-      tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
-        (snap) { tab.snapshot = snap; if (mounted) setState(() {}); },
-        onError: (e) {
-          tab.error = e.toString();
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
-        },
-        onDone: () {
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
-        },
-      );
+      tab.outputSub = rust
+          .shellOutputStream(sessionId: id)
+          .listen(
+            (snap) {
+              _applyTerminalSnapshot(tab, snap);
+              if (mounted) setState(() {});
+            },
+            onError: (e) {
+              tab.error = e.toString();
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+            onDone: () {
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+          );
       tab.state = _ConnState.connected;
       if (mounted) setState(() {});
       _passphrase.clear();
@@ -611,32 +1471,307 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
+  Future<void> _openQuickConnectDialog() async {
+    final controller = TextEditingController();
+    try {
+      final raw = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            final current = controller.text.trim();
+            final isFavorite =
+                current.isNotEmpty && _quickConnectFavorites.contains(current);
+            return AlertDialog(
+              title: const Text('Quick connect'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            autofocus: true,
+                            decoration: const InputDecoration(
+                              labelText: 'user@host:port',
+                              hintText: 'xiu@example.com:22',
+                            ),
+                            onChanged: (_) => setDialogState(() {}),
+                            onSubmitted: (_) =>
+                                Navigator.pop(dialogContext, controller.text),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _IconBtn(
+                          icon: isFavorite
+                              ? Icons.star
+                              : Icons.star_border_outlined,
+                          tooltip: 'Favorite',
+                          onTap: current.isEmpty
+                              ? null
+                              : () {
+                                  setState(() {
+                                    if (isFavorite) {
+                                      _quickConnectFavorites =
+                                          _quickConnectFavorites
+                                              .where((item) => item != current)
+                                              .toList();
+                                    } else {
+                                      _quickConnectFavorites = [
+                                        current,
+                                        ..._quickConnectFavorites.where(
+                                          (item) => item != current,
+                                        ),
+                                      ].take(20).toList();
+                                    }
+                                  });
+                                  setDialogState(() {});
+                                  unawaited(_saveDesktopState());
+                                },
+                        ),
+                      ],
+                    ),
+                    if (_quickConnectFavorites.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        'Favorites',
+                        style: _mono(
+                          size: 11,
+                          color: _ink2,
+                          letterSpacing: 1.2,
+                          weight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final item in _quickConnectFavorites)
+                            ActionChip(
+                              avatar: Icon(Icons.star, size: 14, color: _acc),
+                              label: Text(
+                                item,
+                                style: _mono(size: 11.5, color: _ink0),
+                              ),
+                              onPressed: () =>
+                                  Navigator.pop(dialogContext, item),
+                            ),
+                        ],
+                      ),
+                    ],
+                    if (_quickConnectHistory.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        'Recent',
+                        style: _mono(
+                          size: 11,
+                          color: _ink2,
+                          letterSpacing: 1.2,
+                          weight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final item in _quickConnectHistory)
+                            ActionChip(
+                              label: Text(
+                                item,
+                                style: _mono(size: 11.5, color: _ink0),
+                              ),
+                              onPressed: () =>
+                                  Navigator.pop(dialogContext, item),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () =>
+                      Navigator.pop(dialogContext, controller.text),
+                  child: const Text('Connect'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+      final profile = _profileFromQuickConnect(raw);
+      if (profile == null) return;
+      final value = raw!.trim();
+      setState(() {
+        _quickConnectHistory = [
+          value,
+          ..._quickConnectHistory.where((item) => item != value),
+        ].take(10).toList();
+      });
+      unawaited(_saveDesktopState());
+      await _openProfileAsTab(profile);
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _restoreLastLayout() async {
+    if (_lastLayoutGroups.isNotEmpty) {
+      for (final saved in _lastLayoutGroups) {
+        if (!mounted || saved.profileIds.isEmpty) return;
+        final first = _profileById(saved.profileIds.first);
+        if (first == null) continue;
+        final before = _tabs.length;
+        await _openProfileAsTab(first);
+        if (!mounted || _tabs.length <= before) continue;
+        final group = _tabs.last
+          ..splitAxis = saved.splitAxis
+          ..pinned = saved.pinned
+          ..tabColor = saved.tabColor;
+        if (saved.displayName.isNotEmpty) {
+          group.active.displayName = saved.displayName;
+        }
+        for (final id in saved.profileIds.skip(1)) {
+          final profile = _profileById(id);
+          if (profile != null) {
+            await _openProfileAsTab(
+              profile,
+              splitInto: group,
+              axis: saved.splitAxis,
+            );
+          }
+        }
+        group.normalizeWeights();
+        for (
+          var i = 0;
+          i < group.splitWeights.length && i < saved.splitWeights.length;
+          i++
+        ) {
+          group.splitWeights[i] = saved.splitWeights[i].clamp(0.1, 20.0);
+        }
+        group.activeIdx = saved.activeIdx.clamp(0, group.sessions.length - 1);
+        group.maximizedIdx = saved.maximizedIdx?.clamp(
+          0,
+          group.sessions.length - 1,
+        );
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    final ids = LinkedHashSet<String>.from(_lastProfileIds);
+    if (ids.isEmpty) {
+      ids.addAll(
+        _tabs
+            .map((group) => group.sessions.first.profileId)
+            .where((id) => id != _localShellProfileId),
+      );
+    }
+    for (final id in ids) {
+      if (!mounted) return;
+      final profile = _profileById(id);
+      if (profile != null) {
+        await _openProfileAsTab(profile);
+      }
+    }
+  }
+
+  rust.Profile? _profileFromQuickConnect(String? raw) {
+    final value = raw?.trim();
+    if (value == null || value.isEmpty) return null;
+    var rest = value;
+    var username =
+        Platform.environment['USERNAME'] ??
+        Platform.environment['USER'] ??
+        'user';
+    final at = rest.indexOf('@');
+    if (at >= 0) {
+      username = rest.substring(0, at).trim();
+      rest = rest.substring(at + 1).trim();
+    }
+    var host = rest;
+    var port = 22;
+    final colon = rest.lastIndexOf(':');
+    if (colon > 0 && colon < rest.length - 1) {
+      final parsed = int.tryParse(rest.substring(colon + 1));
+      if (parsed != null) {
+        port = parsed;
+        host = rest.substring(0, colon);
+      }
+    }
+    if (host.trim().isEmpty || username.trim().isEmpty) return null;
+    return rust.Profile(
+      id: 'quick:${DateTime.now().microsecondsSinceEpoch}',
+      name: '$username@$host',
+      host: host.trim(),
+      port: port,
+      username: username.trim(),
+      privateKeyPath: '',
+      notes: 'quick-connect',
+      authMethod: 'agent',
+      jumpHost: '',
+      jumpPort: 22,
+      jumpUsername: '',
+      jumpPrivateKeyPath: '',
+      transport: 'ssh',
+    );
+  }
+
   Future<void> _openLocalShell() async {
-    final tab = _SessionTab(profileId: _localShellProfileId, profileName: 'Local Shell');
+    final tab = _SessionTab(
+      profileId: _localShellProfileId,
+      profileName: 'Local Shell',
+    );
     setState(() {
       _tabs.add(_TabGroup(profileName: 'Local Shell', first: tab));
       _activeIdx = _tabs.length - 1;
       _view = _View.sessions;
     });
+    unawaited(_saveDesktopState());
     await _connectLocalIntoExistingSession(tab);
   }
 
   Future<void> _connectLocalIntoExistingSession(_SessionTab tab) async {
     try {
-      final id = await rust.openLocalShell(shell: null, cols: tab.cols, rows: tab.rows);
-      tab.sessionId = id;
-      tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
-        (snap) { tab.snapshot = snap; if (mounted) setState(() {}); },
-        onError: (e) {
-          tab.error = e.toString();
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
-        },
-        onDone: () {
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
-        },
+      final settings = appSettings.value;
+      final id = await rust.openLocalShellWithOptions(
+        shell: settings.localShell.trim().isEmpty
+            ? null
+            : settings.localShell.trim(),
+        cwd: settings.localShellCwd.trim().isEmpty
+            ? null
+            : settings.localShellCwd.trim(),
+        env: _parseLocalShellEnv(settings.localShellEnv),
+        cols: tab.cols,
+        rows: tab.rows,
       );
+      tab.sessionId = id;
+      tab.outputSub = rust
+          .shellOutputStream(sessionId: id)
+          .listen(
+            (snap) {
+              _applyTerminalSnapshot(tab, snap);
+              if (mounted) setState(() {});
+            },
+            onError: (e) {
+              tab.error = e.toString();
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+            onDone: () {
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+          );
       tab.state = _ConnState.connected;
       if (mounted) setState(() {});
       _termFocus.requestFocus();
@@ -647,8 +1782,40 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
-  Future<void> _connectIntoExistingSession(rust.Profile p, _SessionTab tab) async {
+  List<rust.LocalShellEnvVar> _parseLocalShellEnv(String raw) {
+    return raw
+        .split(RegExp(r'\r?\n'))
+        .map((line) => line.trim())
+        .where(
+          (line) =>
+              line.isNotEmpty && !line.startsWith('#') && line.contains('='),
+        )
+        .map((line) {
+          final idx = line.indexOf('=');
+          return rust.LocalShellEnvVar(
+            name: line.substring(0, idx).trim(),
+            value: line.substring(idx + 1),
+          );
+        })
+        .where((entry) => entry.name.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<void> _connectIntoExistingSession(
+    rust.Profile p,
+    _SessionTab tab,
+  ) async {
+    final l10n = AppLocalizations.of(context);
     try {
+      if (p.transport != 'telnet') {
+        final ok = await _ensureTrustedProfileHostKey(p);
+        if (!ok) {
+          tab.error = l10n.hostKeyNotTrusted;
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+          return;
+        }
+      }
       final jump = rust.JumpHost(
         host: p.jumpHost,
         port: p.jumpPort == 0 ? 22 : p.jumpPort,
@@ -658,33 +1825,70 @@ class _ShellScreenState extends State<ShellScreen> {
       );
       final BigInt id;
       if (p.transport == 'telnet') {
-        id = await rust.openShellTelnet(host: p.host, port: p.port, cols: tab.cols, rows: tab.rows);
+        id = await rust.openShellTelnet(
+          host: p.host,
+          port: p.port,
+          cols: tab.cols,
+          rows: tab.rows,
+        );
       } else if (p.authMethod == 'agent') {
         id = await rust.openShellAgent(
-          host: p.host, port: p.port, username: p.username,
-          cols: tab.cols, rows: tab.rows, jump: jump,
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
         );
+      } else if (p.authMethod == 'password') {
+        final password = await _promptPassword(p);
+        if (password == null) {
+          tab.error = l10n.passwordRequired;
+          tab.state = _ConnState.disconnected;
+          if (mounted) setState(() {});
+          return;
+        }
+        id = await rust.openShellPassword(
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          password: password,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
+        );
+      } else if (p.authMethod == 'keyboard-interactive') {
+        id = await _openKeyboardInteractiveShell(p, tab, jump);
       } else {
         id = await rust.openShellPubkey(
-          host: p.host, port: p.port, username: p.username,
+          host: p.host,
+          port: p.port,
+          username: p.username,
           privateKeyPath: p.privateKeyPath,
           passphrase: _passphrase.text.isEmpty ? null : _passphrase.text,
-          cols: tab.cols, rows: tab.rows, jump: jump,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
         );
       }
       tab.sessionId = id;
-      tab.outputSub = rust.shellOutputStream(sessionId: id).listen(
-        (snap) { tab.snapshot = snap; if (mounted) setState(() {}); },
-        onError: (e) {
-          tab.error = e.toString();
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
-        },
-        onDone: () {
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
-        },
-      );
+      tab.outputSub = rust
+          .shellOutputStream(sessionId: id)
+          .listen(
+            (snap) {
+              _applyTerminalSnapshot(tab, snap);
+              if (mounted) setState(() {});
+            },
+            onError: (e) {
+              tab.error = e.toString();
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+            onDone: () {
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+          );
       tab.state = _ConnState.connected;
       if (mounted) setState(() {});
       _passphrase.clear();
@@ -706,6 +1910,220 @@ class _ShellScreenState extends State<ShellScreen> {
     await _connectSelected(splitInto: _activeGroup, axis: Axis.vertical);
   }
 
+  void _moveTabGroup(int from, int to) {
+    if (from < 0 || from >= _tabs.length || to < 0 || to >= _tabs.length) {
+      return;
+    }
+    if (from == to) return;
+    setState(() {
+      final activeGroup = _activeGroup;
+      final moved = _tabs.removeAt(from);
+      _tabs.insert(to, moved);
+      if (activeGroup != null) {
+        _activeIdx = _tabs.indexOf(activeGroup);
+      }
+    });
+    unawaited(_saveDesktopState());
+  }
+
+  Future<void> _duplicateTabGroup(int idx) async {
+    if (idx < 0 || idx >= _tabs.length) return;
+    final tab = _tabs[idx].active;
+    if (tab.profileId == _localShellProfileId) {
+      await _openLocalShell();
+      return;
+    }
+    final profile = _profileById(tab.profileId);
+    if (profile != null) {
+      await _openProfileAsTab(profile);
+    }
+  }
+
+  Future<void> _closeOtherTabGroups(int idx) async {
+    if (idx < 0 || idx >= _tabs.length) return;
+    for (var i = _tabs.length - 1; i >= 0; i--) {
+      if (i != idx) {
+        await _closeTab(i);
+      }
+    }
+    if (mounted) {
+      setState(() => _activeIdx = _tabs.isEmpty ? -1 : 0);
+      unawaited(_saveDesktopState());
+    }
+  }
+
+  Future<void> _closeTabGroupsToRight(int idx) async {
+    if (idx < 0 || idx >= _tabs.length - 1) return;
+    for (var i = _tabs.length - 1; i > idx; i--) {
+      await _closeTab(i);
+    }
+    unawaited(_saveDesktopState());
+  }
+
+  void _moveActiveTabGroupBy(int delta) {
+    if (_activeIdx < 0 || _tabs.length < 2) return;
+    final target = (_activeIdx + delta).clamp(0, _tabs.length - 1);
+    if (target == _activeIdx) return;
+    _moveTabGroup(_activeIdx, target);
+  }
+
+  Future<void> _detachActiveTabGroup() async {
+    await _detachTabGroup(_activeIdx);
+  }
+
+  void _toggleActiveTabPin() {
+    _togglePinTabGroup(_activeIdx);
+  }
+
+  void _dropTabGroupIntoSplit(int from, Axis axis) {
+    final target = _activeGroup;
+    if (target == null || from < 0 || from >= _tabs.length) return;
+    final source = _tabs[from];
+    if (identical(source, target)) {
+      setState(() => target.splitAxis = axis);
+      unawaited(_saveDesktopState());
+      return;
+    }
+    setState(() {
+      target.splitAxis = axis;
+      target.sessions.addAll(source.sessions);
+      target.splitWeights.addAll(source.sessions.map((_) => 1.0));
+      target.normalizeWeights();
+      target.activeIdx = target.sessions.length - source.sessions.length;
+      _tabs.removeAt(from);
+      _activeIdx = _tabs.indexOf(target);
+    });
+    unawaited(_saveDesktopState());
+    _termFocus.requestFocus();
+  }
+
+  Future<void> _detachTabGroup(int idx) async {
+    if (idx < 0 || idx >= _tabs.length) return;
+    final group = _tabs[idx];
+    final args = _NativeDetachedSessionArgs(
+      profileName: group.profileName,
+      splitAxis: group.splitAxis,
+      sessions: [
+        for (final session in group.sessions)
+          if (session.sessionId != null)
+            _NativeDetachedSessionInfo(
+              sessionId: session.sessionId!,
+              profileId: session.profileId,
+              profileName: session.displayName,
+              cols: session.cols,
+              rows: session.rows,
+            ),
+      ],
+    );
+    if (args.sessions.isEmpty) return;
+    final controller = await WindowController.create(
+      WindowConfiguration(arguments: args.toJson(), hiddenAtLaunch: true),
+    );
+    await controller.show();
+    for (final session in group.sessions) {
+      final sub = session.outputSub;
+      session.outputSub = null;
+      await sub?.cancel();
+    }
+    if (!mounted) return;
+    setState(() {
+      _tabs.removeAt(idx);
+      if (_tabs.isEmpty) {
+        _activeIdx = -1;
+      } else if (_activeIdx >= _tabs.length) {
+        _activeIdx = _tabs.length - 1;
+      } else if (_activeIdx > idx) {
+        _activeIdx -= 1;
+      }
+      _view = _View.sessions;
+    });
+    unawaited(_saveDesktopState());
+  }
+
+  void _reattachDetachedTabGroup(int idx) {
+    if (idx < 0 || idx >= _detachedTabs.length) return;
+    setState(() {
+      final detached = _detachedTabs.removeAt(idx);
+      _tabs.add(detached.group);
+      _activeIdx = _tabs.length - 1;
+      _view = _View.sessions;
+    });
+    unawaited(_saveDesktopState());
+    _termFocus.requestFocus();
+  }
+
+  Future<void> _closeDetachedTabGroup(int idx) async {
+    if (idx < 0 || idx >= _detachedTabs.length) return;
+    final detached = _detachedTabs.removeAt(idx);
+    if (mounted) setState(() {});
+    await detached.group.dispose();
+    unawaited(_saveDesktopState());
+  }
+
+  void _moveDetachedTabGroup(int idx, Offset delta) {
+    if (idx < 0 || idx >= _detachedTabs.length) return;
+    setState(() {
+      final item = _detachedTabs[idx];
+      item.offset += delta;
+      final screen = MediaQuery.sizeOf(context);
+      item.offset = Offset(
+        item.offset.dx.clamp(0, (screen.width - 180).clamp(0, screen.width)),
+        item.offset.dy.clamp(
+          36,
+          (screen.height - 120).clamp(36, screen.height),
+        ),
+      );
+    });
+  }
+
+  void _reattachNativeSession(String raw) {
+    final args = _NativeDetachedSessionArgs.fromJson(raw);
+    final sessions = <_SessionTab>[];
+    for (final info in args.sessions) {
+      final tab =
+          _SessionTab(profileId: info.profileId, profileName: info.profileName)
+            ..sessionId = info.sessionId
+            ..cols = info.cols
+            ..rows = info.rows
+            ..state = _ConnState.connected;
+      tab.outputSub = rust
+          .shellOutputStream(sessionId: info.sessionId)
+          .listen(
+            (snapshot) {
+              _applyTerminalSnapshot(tab, snapshot);
+              if (mounted) setState(() {});
+            },
+            onError: (e) {
+              tab.error = e.toString();
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+            onDone: () {
+              tab.state = _ConnState.disconnected;
+              if (mounted) setState(() {});
+            },
+          );
+      sessions.add(tab);
+    }
+    if (sessions.isEmpty) return;
+    setState(() {
+      final group = _TabGroup(
+        profileName: args.profileName,
+        first: sessions.first,
+      )..splitAxis = args.splitAxis;
+      for (final session in sessions.skip(1)) {
+        group.sessions.add(session);
+        group.splitWeights.add(1.0);
+      }
+      group.normalizeWeights();
+      _tabs.add(group);
+      _activeIdx = _tabs.length - 1;
+      _view = _View.sessions;
+    });
+    unawaited(_saveDesktopState());
+    _termFocus.requestFocus();
+  }
+
   Future<void> _closeActiveSession() async {
     final group = _activeGroup;
     if (group == null) return;
@@ -717,11 +2135,14 @@ class _ShellScreenState extends State<ShellScreen> {
     final idx = group.activeIdx;
     setState(() {
       group.sessions.removeAt(idx);
+      group.splitWeights.removeAt(idx);
+      group.normalizeWeights();
       if (group.activeIdx >= group.sessions.length) {
         group.activeIdx = group.sessions.length - 1;
       }
     });
     await session.dispose();
+    unawaited(_saveDesktopState());
   }
 
   Future<void> _disconnectActive() async {
@@ -745,7 +2166,10 @@ class _ShellScreenState extends State<ShellScreen> {
     if (group == null || old == null) return;
     if (old.profileId == _localShellProfileId) {
       await old.dispose();
-      final fresh = _SessionTab(profileId: _localShellProfileId, profileName: 'Local Shell');
+      final fresh = _SessionTab(
+        profileId: _localShellProfileId,
+        profileName: 'Local Shell',
+      );
       setState(() => group.sessions[group.activeIdx] = fresh);
       await _connectLocalIntoExistingSession(fresh);
       return;
@@ -759,6 +2183,17 @@ class _ShellScreenState extends State<ShellScreen> {
       _selectedProfileId = profile.id;
     });
     await _connectIntoExistingSession(profile, fresh);
+  }
+
+  Future<void> _setTerminalScrollback(_SessionTab tab, int rows) async {
+    final id = tab.sessionId;
+    if (id == null) return;
+    final snapshot = await rust.shellSetScrollback(
+      sessionId: id,
+      rows: rows.clamp(0, terminalPrefs.value.scrollbackLimit),
+    );
+    if (!mounted) return;
+    setState(() => tab.snapshot = snapshot);
   }
 
   Future<void> _closeTab(int idx) async {
@@ -775,12 +2210,349 @@ class _ShellScreenState extends State<ShellScreen> {
         _activeIdx -= 1;
       }
     });
+    unawaited(_saveDesktopState());
   }
 
   void _switchTab(int idx) {
     if (idx == _activeIdx) return;
-    setState(() => _activeIdx = idx);
+    setState(() {
+      _activeIdx = idx;
+      _activeGroup?.active.hasUnreadActivity = false;
+      _activeGroup?.active.hasBellActivity = false;
+    });
     _termFocus.requestFocus();
+  }
+
+  void _resizeSplit(_TabGroup group, int dividerIndex, double deltaPixels) {
+    if (dividerIndex < 0 || dividerIndex + 1 >= group.sessions.length) return;
+    setState(() {
+      group.normalizeWeights();
+      final delta = deltaPixels / 180.0;
+      final left = (group.splitWeights[dividerIndex] + delta).clamp(0.35, 8.0);
+      final right = (group.splitWeights[dividerIndex + 1] - delta).clamp(
+        0.35,
+        8.0,
+      );
+      group.splitWeights[dividerIndex] = left;
+      group.splitWeights[dividerIndex + 1] = right;
+    });
+    unawaited(_saveDesktopState());
+  }
+
+  void _activateSplitPane(_TabGroup group, int paneIndex) {
+    if (paneIndex < 0 || paneIndex >= group.sessions.length) return;
+    setState(() {
+      group.activeIdx = paneIndex;
+      group.sessions[paneIndex].hasUnreadActivity = false;
+      group.sessions[paneIndex].hasBellActivity = false;
+    });
+    _termFocus.requestFocus();
+    unawaited(_saveDesktopState());
+  }
+
+  void _focusAdjacentSplitPane(int direction) {
+    final group = _activeGroup;
+    if (group == null || group.sessions.length < 2) return;
+    final next =
+        (group.activeIdx + direction + group.sessions.length) %
+        group.sessions.length;
+    _activateSplitPane(group, next);
+  }
+
+  void _toggleMaximizeSplitPane() {
+    final group = _activeGroup;
+    if (group == null || group.sessions.length < 2) return;
+    setState(() {
+      group.maximizedIdx = group.maximizedIdx == null ? group.activeIdx : null;
+    });
+    unawaited(_saveDesktopState());
+  }
+
+  Future<void> _renameTabGroup(int idx) async {
+    if (idx < 0 || idx >= _tabs.length) return;
+    final group = _tabs[idx];
+    final controller = TextEditingController(text: group.displayName);
+    try {
+      final name = await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Rename tab'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Tab name'),
+            onSubmitted: (_) => Navigator.pop(context, controller.text),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('Rename'),
+            ),
+          ],
+        ),
+      );
+      if (name == null || name.trim().isEmpty) return;
+      setState(() {
+        group.profileName = name.trim();
+        group.active.displayName = name.trim();
+      });
+      unawaited(_saveDesktopState());
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  void _togglePinTabGroup(int idx) {
+    if (idx < 0 || idx >= _tabs.length) return;
+    setState(() {
+      final group = _tabs[idx];
+      group.pinned = !group.pinned;
+      group.active.pinned = group.pinned;
+      _tabs.sort((a, b) {
+        if (a.pinned == b.pinned) return 0;
+        return a.pinned ? -1 : 1;
+      });
+      _activeIdx = _tabs.indexOf(group);
+    });
+    unawaited(_saveDesktopState());
+  }
+
+  void _setTabGroupColor(int idx, Color? color) {
+    if (idx < 0 || idx >= _tabs.length) return;
+    setState(() {
+      final group = _tabs[idx];
+      group.tabColor = color;
+      group.active.tabColor = color;
+    });
+    unawaited(_saveDesktopState());
+  }
+
+  Future<void> _openTerminalUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+      return;
+    }
+    if (Platform.isWindows) {
+      await Process.run('rundll32', ['url.dll,FileProtocolHandler', url]);
+    } else if (Platform.isMacOS) {
+      await Process.run('open', [url]);
+    } else {
+      await Process.run('xdg-open', [url]);
+    }
+  }
+
+  Future<bool> _ensureTrustedProfileHostKey(rust.Profile profile) async {
+    if (profile.jumpHost.isEmpty) {
+      return _ensureTrustedHostKey(profile.host, profile.port);
+    }
+    final jumpPort = profile.jumpPort == 0 ? 22 : profile.jumpPort;
+    final jumpTrusted = await _ensureTrustedHostKey(profile.jumpHost, jumpPort);
+    if (!jumpTrusted) return false;
+    return _ensureTrustedHostKey(
+      profile.host,
+      profile.port,
+      viaJump: rust.JumpHost(
+        host: profile.jumpHost,
+        port: jumpPort,
+        username: profile.jumpUsername,
+        privateKeyPath: profile.jumpPrivateKeyPath,
+        passphrase: null,
+      ),
+    );
+  }
+
+  Future<bool> _ensureTrustedHostKey(
+    String host,
+    int port, {
+    rust.JumpHost? viaJump,
+  }) async {
+    if (!mounted) return false;
+    final l10n = AppLocalizations.of(context);
+    final check = viaJump == null
+        ? await rust.probeHostKey(host: host, port: port)
+        : await rust.probeHostKeyViaJump(host: host, port: port, jump: viaJump);
+    if (!mounted) return false;
+    if (check.status == 'trusted') return true;
+    if (check.status == 'changed') {
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(l10n.hostKeyChangedTitle),
+          content: HostKeyDecisionDetails(
+            host: host,
+            port: port,
+            status: 'changed',
+            expected: check.expected,
+            actual: check.actual,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.close),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(l10n.replaceHostKey),
+            ),
+          ],
+        ),
+      );
+      if (replace == true) {
+        await rust.deleteHostKey(host: host, port: port);
+        await rust.trustHostKey(
+          host: host,
+          port: port,
+          fingerprint: check.actual,
+        );
+        return true;
+      }
+      return false;
+    }
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(l10n.trustHostKeyTitle),
+        content: HostKeyDecisionDetails(
+          host: host,
+          port: port,
+          status: 'new',
+          actual: check.actual,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.trust),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return false;
+    if (approved == true) {
+      await rust.trustHostKey(
+        host: host,
+        port: port,
+        fingerprint: check.actual,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  Future<String?> _promptPassword(rust.Profile profile) async {
+    final l10n = AppLocalizations.of(context);
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(l10n.passwordFor(profile.name)),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            obscureText: true,
+            decoration: InputDecoration(labelText: l10n.password),
+            onSubmitted: (_) => Navigator.pop(context, controller.text),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: Text(l10n.connect),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<BigInt> _openKeyboardInteractiveShell(
+    rust.Profile profile,
+    _SessionTab tab,
+    rust.JumpHost jump,
+  ) async {
+    final responses = <String>[];
+    final passwordRequired = AppLocalizations.of(context).passwordRequired;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      try {
+        return await rust.openShellKeyboardInteractive(
+          host: profile.host,
+          port: profile.port,
+          username: profile.username,
+          responses: responses,
+          cols: tab.cols,
+          rows: tab.rows,
+          jump: jump,
+        );
+      } catch (e) {
+        final prompt = _keyboardInteractivePromptFromError(e.toString());
+        if (prompt == null) rethrow;
+        final answer = await _promptKeyboardInteractive(profile, prompt);
+        if (answer == null) {
+          throw passwordRequired;
+        }
+        responses.add(answer);
+      }
+    }
+    throw 'Too many keyboard-interactive prompts.';
+  }
+
+  String? _keyboardInteractivePromptFromError(String error) {
+    const marker = 'keyboard-interactive prompt has no configured response: ';
+    final idx = error.indexOf(marker);
+    if (idx < 0) return null;
+    return error.substring(idx + marker.length).trim();
+  }
+
+  Future<String?> _promptKeyboardInteractive(
+    rust.Profile profile,
+    String prompt,
+  ) async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(AppLocalizations.of(context).keyboardInteractive),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            obscureText:
+                prompt.toLowerCase().contains('password') ||
+                prompt.toLowerCase().contains('passcode') ||
+                prompt.toLowerCase().contains('otp'),
+            decoration: InputDecoration(
+              labelText: prompt.isEmpty ? profile.name : prompt,
+            ),
+            onSubmitted: (_) => Navigator.pop(context, controller.text),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(AppLocalizations.of(context).cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: Text(AppLocalizations.of(context).connect),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 
   // ---------------------- Terminal I/O ----------------------
@@ -797,8 +2569,12 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Future<void> _copyScreen() async {
-    final text = _activeTab?.snapshot?.text;
-    if (text == null || text.isEmpty) return;
+    final tab = _activeTab;
+    final text = chooseTerminalCopyText(
+      selectionText: tab?.selectedTerminalText,
+      screenText: tab?.snapshot?.text,
+    );
+    if (text == null) return;
     await Clipboard.setData(ClipboardData(text: text));
   }
 
@@ -806,7 +2582,37 @@ class _ShellScreenState extends State<ShellScreen> {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text == null || text.isEmpty) return;
-    await _writeBytes(utf8.encode(text.replaceAll('\n', '\r')));
+    final decision = assessTerminalPaste(text);
+    if (terminalPrefs.value.warnOnLargePaste &&
+        decision.shouldConfirm &&
+        mounted) {
+      final l10n = AppLocalizations.of(context);
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(l10n.confirmPasteTitle),
+          content: Text(
+            l10n.confirmPasteContent(decision.lineCount, decision.byteCount),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(l10n.paste),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    final activeSnapshot = _activeTab?.snapshot;
+    final payload = activeSnapshot?.bracketedPasteMode == true
+        ? '\x1b[200~${decision.text}\x1b[201~'
+        : decision.normalizedForPty;
+    await _writeBytes(utf8.encode(payload));
   }
 
   List<int>? _keyEventToBytes(KeyEvent event) {
@@ -873,33 +2679,36 @@ class _ShellScreenState extends State<ShellScreen> {
 
     if (ctrl) {
       final shift = HardwareKeyboard.instance.isShiftPressed;
-      if (logical == LogicalKeyboardKey.keyT ||
-          logical == LogicalKeyboardKey.keyW ||
-          logical == LogicalKeyboardKey.tab ||
-          logical == LogicalKeyboardKey.comma ||
-          logical == LogicalKeyboardKey.keyK ||
-          (shift &&
-              (logical == LogicalKeyboardKey.keyC ||
-                  logical == LogicalKeyboardKey.keyH ||
-                  logical == LogicalKeyboardKey.keyR ||
-                  logical == LogicalKeyboardKey.keyV ||
-                  logical == LogicalKeyboardKey.keyE))) {
+      if (_shortcutReservesTerminalInput(logical, shift)) {
         return null;
       }
       final ctrlLetters = <LogicalKeyboardKey, int>{
-        LogicalKeyboardKey.keyA: 0x01, LogicalKeyboardKey.keyB: 0x02,
-        LogicalKeyboardKey.keyC: 0x03, LogicalKeyboardKey.keyD: 0x04,
-        LogicalKeyboardKey.keyE: 0x05, LogicalKeyboardKey.keyF: 0x06,
-        LogicalKeyboardKey.keyG: 0x07, LogicalKeyboardKey.keyH: 0x08,
-        LogicalKeyboardKey.keyI: 0x09, LogicalKeyboardKey.keyJ: 0x0A,
-        LogicalKeyboardKey.keyK: 0x0B, LogicalKeyboardKey.keyL: 0x0C,
-        LogicalKeyboardKey.keyM: 0x0D, LogicalKeyboardKey.keyN: 0x0E,
-        LogicalKeyboardKey.keyO: 0x0F, LogicalKeyboardKey.keyP: 0x10,
-        LogicalKeyboardKey.keyQ: 0x11, LogicalKeyboardKey.keyR: 0x12,
-        LogicalKeyboardKey.keyS: 0x13, LogicalKeyboardKey.keyT: 0x14,
-        LogicalKeyboardKey.keyU: 0x15, LogicalKeyboardKey.keyV: 0x16,
-        LogicalKeyboardKey.keyW: 0x17, LogicalKeyboardKey.keyX: 0x18,
-        LogicalKeyboardKey.keyY: 0x19, LogicalKeyboardKey.keyZ: 0x1A,
+        LogicalKeyboardKey.keyA: 0x01,
+        LogicalKeyboardKey.keyB: 0x02,
+        LogicalKeyboardKey.keyC: 0x03,
+        LogicalKeyboardKey.keyD: 0x04,
+        LogicalKeyboardKey.keyE: 0x05,
+        LogicalKeyboardKey.keyF: 0x06,
+        LogicalKeyboardKey.keyG: 0x07,
+        LogicalKeyboardKey.keyH: 0x08,
+        LogicalKeyboardKey.keyI: 0x09,
+        LogicalKeyboardKey.keyJ: 0x0A,
+        LogicalKeyboardKey.keyK: 0x0B,
+        LogicalKeyboardKey.keyL: 0x0C,
+        LogicalKeyboardKey.keyM: 0x0D,
+        LogicalKeyboardKey.keyN: 0x0E,
+        LogicalKeyboardKey.keyO: 0x0F,
+        LogicalKeyboardKey.keyP: 0x10,
+        LogicalKeyboardKey.keyQ: 0x11,
+        LogicalKeyboardKey.keyR: 0x12,
+        LogicalKeyboardKey.keyS: 0x13,
+        LogicalKeyboardKey.keyT: 0x14,
+        LogicalKeyboardKey.keyU: 0x15,
+        LogicalKeyboardKey.keyV: 0x16,
+        LogicalKeyboardKey.keyW: 0x17,
+        LogicalKeyboardKey.keyX: 0x18,
+        LogicalKeyboardKey.keyY: 0x19,
+        LogicalKeyboardKey.keyZ: 0x1A,
       };
       final direct = ctrlLetters[logical];
       if (direct != null) return [direct];
@@ -926,10 +2735,36 @@ class _ShellScreenState extends State<ShellScreen> {
     return null;
   }
 
+  bool _shortcutReservesTerminalInput(LogicalKeyboardKey key, bool shift) {
+    final control = HardwareKeyboard.instance.isControlPressed;
+    final alt = HardwareKeyboard.instance.isAltPressed;
+    final meta = HardwareKeyboard.instance.isMetaPressed;
+    for (final spec in shortcutPrefs.value.bindings.values) {
+      final activator = _parseShortcutActivator(spec);
+      if (activator == null) continue;
+      if (activator.trigger == key &&
+          activator.control == control &&
+          activator.shift == shift &&
+          activator.alt == alt &&
+          activator.meta == meta) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   KeyEventResult _onTermKey(FocusNode node, KeyEvent event) {
     final tab = _activeTab;
     if (tab == null || tab.state != _ConnState.connected) {
       return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      if (_shortcutReservesTerminalInput(
+        event.logicalKey,
+        HardwareKeyboard.instance.isShiftPressed,
+      )) {
+        return KeyEventResult.ignored;
+      }
     }
     final bytes = _keyEventToBytes(event);
     if (bytes != null) {
@@ -939,9 +2774,7 @@ class _ShellScreenState extends State<ShellScreen> {
     return KeyEventResult.ignored;
   }
 
-  void _scheduleResize(int cols, int rows) {
-    final tab = _activeTab;
-    if (tab == null) return;
+  void _scheduleResize(_SessionTab tab, int cols, int rows) {
     if (cols == tab.cols && rows == tab.rows) return;
     tab.resizeDebounce?.cancel();
     tab.resizeDebounce = Timer(const Duration(milliseconds: 200), () {
@@ -963,6 +2796,7 @@ class _ShellScreenState extends State<ShellScreen> {
     try {
       await rust.saveSettings(settings: s);
       appSettings.value = s;
+      await _saveDesktopState();
     } catch (e) {
       if (mounted) setState(() => _sidebarError = e.toString());
     }
@@ -973,8 +2807,12 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   void dispose() {
+    _sessionWindowChannel.setMethodCallHandler(null);
     for (final t in _tabs) {
       t.dispose();
+    }
+    for (final t in _detachedTabs) {
+      t.group.dispose();
     }
     _passphrase.dispose();
     _termFocus.dispose();
@@ -983,68 +2821,242 @@ class _ShellScreenState extends State<ShellScreen> {
 
   // ---------------------- Build ----------------------
 
+  Map<ShortcutActivator, Intent> _shortcutMap() {
+    final bindings = shortcutPrefs.value.bindings;
+    final entries = <ShortcutActivator, Intent>{};
+    void add(String action, Intent intent) {
+      final activator = _parseShortcutActivator(
+        bindings[action] ?? _defaultShortcutBindings[action] ?? 'None',
+      );
+      if (activator != null) entries.putIfAbsent(activator, () => intent);
+    }
+
+    add('newTab', const _NewTabIntent());
+    add('closeTab', const _CloseTabIntent());
+    add('nextTab', const _NextTabIntent());
+    add('prevTab', const _PrevTabIntent());
+    add('settings', const _SettingsIntent());
+    add('palette', const _PaletteIntent());
+    add('splitRight', const _SplitHorizontalIntent());
+    add('splitDown', const _SplitVerticalIntent());
+    add('copy', const _CopyScreenIntent());
+    add('paste', const _PasteClipboardIntent());
+    add('reconnect', const _ReconnectIntent());
+    add('duplicateTab', const _DuplicateTabIntent());
+    add('closeOtherTabs', const _CloseOtherTabsIntent());
+    add('closeTabsToRight', const _CloseTabsToRightIntent());
+    add('prevPane', const _PrevPaneIntent());
+    add('nextPane', const _NextPaneIntent());
+    add('maximizePane', const _MaximizePaneIntent());
+    add('moveTabLeft', const _MoveTabLeftIntent());
+    add('moveTabRight', const _MoveTabRightIntent());
+    add('detachTab', const _DetachTabIntent());
+    add('pinTab', const _PinTabIntent());
+    add('closePane', const _ClosePaneIntent());
+    return entries;
+  }
+
+  SingleActivator? _parseShortcutActivator(String spec) {
+    if (spec == 'None') return null;
+    final parts = spec.split('+').map((p) => p.trim()).toList();
+    if (parts.isEmpty) return null;
+    final keyName = parts.last.toUpperCase();
+    final key = switch (keyName) {
+      'T' => LogicalKeyboardKey.keyT,
+      'W' => LogicalKeyboardKey.keyW,
+      'K' => LogicalKeyboardKey.keyK,
+      'H' => LogicalKeyboardKey.keyH,
+      'E' => LogicalKeyboardKey.keyE,
+      'C' => LogicalKeyboardKey.keyC,
+      'V' => LogicalKeyboardKey.keyV,
+      'R' => LogicalKeyboardKey.keyR,
+      'D' => LogicalKeyboardKey.keyD,
+      'M' => LogicalKeyboardKey.keyM,
+      'O' => LogicalKeyboardKey.keyO,
+      'L' => LogicalKeyboardKey.keyL,
+      'N' => LogicalKeyboardKey.keyN,
+      'B' => LogicalKeyboardKey.keyB,
+      'P' => LogicalKeyboardKey.keyP,
+      'TAB' => LogicalKeyboardKey.tab,
+      'PAGEDOWN' => LogicalKeyboardKey.pageDown,
+      'PAGEUP' => LogicalKeyboardKey.pageUp,
+      'LEFT' => LogicalKeyboardKey.arrowLeft,
+      'RIGHT' => LogicalKeyboardKey.arrowRight,
+      'UP' => LogicalKeyboardKey.arrowUp,
+      'DOWN' => LogicalKeyboardKey.arrowDown,
+      'HOME' => LogicalKeyboardKey.home,
+      'END' => LogicalKeyboardKey.end,
+      'INSERT' => LogicalKeyboardKey.insert,
+      'DELETE' => LogicalKeyboardKey.delete,
+      'BACKSPACE' => LogicalKeyboardKey.backspace,
+      ',' => LogicalKeyboardKey.comma,
+      'F1' => LogicalKeyboardKey.f1,
+      'F2' => LogicalKeyboardKey.f2,
+      'F3' => LogicalKeyboardKey.f3,
+      'F4' => LogicalKeyboardKey.f4,
+      'F5' => LogicalKeyboardKey.f5,
+      'F6' => LogicalKeyboardKey.f6,
+      'F7' => LogicalKeyboardKey.f7,
+      'F8' => LogicalKeyboardKey.f8,
+      'F9' => LogicalKeyboardKey.f9,
+      'F10' => LogicalKeyboardKey.f10,
+      'F11' => LogicalKeyboardKey.f11,
+      'F12' => LogicalKeyboardKey.f12,
+      _ => null,
+    };
+    if (key == null) return null;
+    final mods = parts.take(parts.length - 1).map((p) => p.toLowerCase());
+    return SingleActivator(
+      key,
+      control: mods.contains('ctrl'),
+      shift: mods.contains('shift'),
+      alt: mods.contains('alt'),
+      meta: mods.contains('meta'),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.keyT, control: true): _NewTabIntent(),
-        SingleActivator(LogicalKeyboardKey.keyW, control: true): _CloseTabIntent(),
-        SingleActivator(LogicalKeyboardKey.tab, control: true): _NextTabIntent(),
-        SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): _PrevTabIntent(),
-        SingleActivator(LogicalKeyboardKey.comma, control: true): _SettingsIntent(),
-        SingleActivator(LogicalKeyboardKey.keyK, control: true): _PaletteIntent(),
-        SingleActivator(LogicalKeyboardKey.keyH, control: true, shift: true): _SplitHorizontalIntent(),
-        SingleActivator(LogicalKeyboardKey.keyE, control: true, shift: true): _SplitVerticalIntent(),
-        SingleActivator(LogicalKeyboardKey.keyC, control: true, shift: true): _CopyScreenIntent(),
-        SingleActivator(LogicalKeyboardKey.keyV, control: true, shift: true): _PasteClipboardIntent(),
-        SingleActivator(LogicalKeyboardKey.keyR, control: true, shift: true): _ReconnectIntent(),
-      },
+      shortcuts: _shortcutMap(),
       child: Actions(
         actions: <Type, Action<Intent>>{
-          _NewTabIntent: CallbackAction<_NewTabIntent>(onInvoke: (_) {
-            if (_selectedProfile != null) _connectSelected();
-            return null;
-          }),
-          _CloseTabIntent: CallbackAction<_CloseTabIntent>(onInvoke: (_) {
-            _closeActiveSession();
-            return null;
-          }),
-          _NextTabIntent: CallbackAction<_NextTabIntent>(onInvoke: (_) {
-            if (_tabs.length >= 2) _switchTab((_activeIdx + 1) % _tabs.length);
-            return null;
-          }),
-          _PrevTabIntent: CallbackAction<_PrevTabIntent>(onInvoke: (_) {
-            if (_tabs.length >= 2) _switchTab((_activeIdx - 1 + _tabs.length) % _tabs.length);
-            return null;
-          }),
-          _SettingsIntent: CallbackAction<_SettingsIntent>(onInvoke: (_) {
-            _openSettingsView();
-            return null;
-          }),
-          _PaletteIntent: CallbackAction<_PaletteIntent>(onInvoke: (_) {
-            _togglePalette();
-            return null;
-          }),
-          _SplitHorizontalIntent: CallbackAction<_SplitHorizontalIntent>(onInvoke: (_) {
-            _splitHorizontal();
-            return null;
-          }),
-          _SplitVerticalIntent: CallbackAction<_SplitVerticalIntent>(onInvoke: (_) {
-            _splitVertical();
-            return null;
-          }),
-          _CopyScreenIntent: CallbackAction<_CopyScreenIntent>(onInvoke: (_) {
-            _copyScreen();
-            return null;
-          }),
-          _PasteClipboardIntent: CallbackAction<_PasteClipboardIntent>(onInvoke: (_) {
-            _pasteClipboard();
-            return null;
-          }),
-          _ReconnectIntent: CallbackAction<_ReconnectIntent>(onInvoke: (_) {
-            _reconnectActive();
-            return null;
-          }),
+          _NewTabIntent: CallbackAction<_NewTabIntent>(
+            onInvoke: (_) {
+              if (_selectedProfile != null) _connectSelected();
+              return null;
+            },
+          ),
+          _CloseTabIntent: CallbackAction<_CloseTabIntent>(
+            onInvoke: (_) {
+              _closeActiveSession();
+              return null;
+            },
+          ),
+          _NextTabIntent: CallbackAction<_NextTabIntent>(
+            onInvoke: (_) {
+              if (_tabs.length >= 2) {
+                _switchTab((_activeIdx + 1) % _tabs.length);
+              }
+              return null;
+            },
+          ),
+          _PrevTabIntent: CallbackAction<_PrevTabIntent>(
+            onInvoke: (_) {
+              if (_tabs.length >= 2) {
+                _switchTab((_activeIdx - 1 + _tabs.length) % _tabs.length);
+              }
+              return null;
+            },
+          ),
+          _SettingsIntent: CallbackAction<_SettingsIntent>(
+            onInvoke: (_) {
+              _openSettingsView();
+              return null;
+            },
+          ),
+          _PaletteIntent: CallbackAction<_PaletteIntent>(
+            onInvoke: (_) {
+              _togglePalette();
+              return null;
+            },
+          ),
+          _SplitHorizontalIntent: CallbackAction<_SplitHorizontalIntent>(
+            onInvoke: (_) {
+              _splitHorizontal();
+              return null;
+            },
+          ),
+          _SplitVerticalIntent: CallbackAction<_SplitVerticalIntent>(
+            onInvoke: (_) {
+              _splitVertical();
+              return null;
+            },
+          ),
+          _CopyScreenIntent: CallbackAction<_CopyScreenIntent>(
+            onInvoke: (_) {
+              _copyScreen();
+              return null;
+            },
+          ),
+          _PasteClipboardIntent: CallbackAction<_PasteClipboardIntent>(
+            onInvoke: (_) {
+              _pasteClipboard();
+              return null;
+            },
+          ),
+          _ReconnectIntent: CallbackAction<_ReconnectIntent>(
+            onInvoke: (_) {
+              _reconnectActive();
+              return null;
+            },
+          ),
+          _DuplicateTabIntent: CallbackAction<_DuplicateTabIntent>(
+            onInvoke: (_) {
+              _duplicateTabGroup(_activeIdx);
+              return null;
+            },
+          ),
+          _CloseOtherTabsIntent: CallbackAction<_CloseOtherTabsIntent>(
+            onInvoke: (_) {
+              _closeOtherTabGroups(_activeIdx);
+              return null;
+            },
+          ),
+          _CloseTabsToRightIntent: CallbackAction<_CloseTabsToRightIntent>(
+            onInvoke: (_) {
+              _closeTabGroupsToRight(_activeIdx);
+              return null;
+            },
+          ),
+          _PrevPaneIntent: CallbackAction<_PrevPaneIntent>(
+            onInvoke: (_) {
+              _focusAdjacentSplitPane(-1);
+              return null;
+            },
+          ),
+          _NextPaneIntent: CallbackAction<_NextPaneIntent>(
+            onInvoke: (_) {
+              _focusAdjacentSplitPane(1);
+              return null;
+            },
+          ),
+          _MaximizePaneIntent: CallbackAction<_MaximizePaneIntent>(
+            onInvoke: (_) {
+              _toggleMaximizeSplitPane();
+              return null;
+            },
+          ),
+          _MoveTabLeftIntent: CallbackAction<_MoveTabLeftIntent>(
+            onInvoke: (_) {
+              _moveActiveTabGroupBy(-1);
+              return null;
+            },
+          ),
+          _MoveTabRightIntent: CallbackAction<_MoveTabRightIntent>(
+            onInvoke: (_) {
+              _moveActiveTabGroupBy(1);
+              return null;
+            },
+          ),
+          _DetachTabIntent: CallbackAction<_DetachTabIntent>(
+            onInvoke: (_) {
+              _detachActiveTabGroup();
+              return null;
+            },
+          ),
+          _PinTabIntent: CallbackAction<_PinTabIntent>(
+            onInvoke: (_) {
+              _toggleActiveTabPin();
+              return null;
+            },
+          ),
+          _ClosePaneIntent: CallbackAction<_ClosePaneIntent>(
+            onInvoke: (_) {
+              _closeActiveSession();
+              return null;
+            },
+          ),
         },
         child: Focus(
           autofocus: true,
@@ -1055,18 +3067,30 @@ class _ShellScreenState extends State<ShellScreen> {
                 Column(
                   children: [
                     _TitleBar(
-                      title: _titleText(),
+                      title: _titleText(context),
                       onPalette: _togglePalette,
+                      sidebarCollapsed: _sidebarCollapsed,
+                      onToggleSidebar: () {
+                        setState(() => _sidebarCollapsed = !_sidebarCollapsed);
+                        _saveDesktopState();
+                      },
                     ),
                     Expanded(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _Sidebar(
-                            view: _view,
-                            sessionsCount: _tabs.length,
-                            onView: (v) => setState(() => _view = v),
-                            onPalette: _togglePalette,
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 160),
+                            switchInCurve: Curves.easeOut,
+                            switchOutCurve: Curves.easeIn,
+                            child: _sidebarCollapsed
+                                ? const SizedBox.shrink()
+                                : _Sidebar(
+                                    view: _view,
+                                    sessionsCount: _tabs.length,
+                                    onView: (v) => setState(() => _view = v),
+                                    onPalette: _togglePalette,
+                                  ),
                           ),
                           Expanded(child: _mainArea()),
                         ],
@@ -1077,11 +3101,17 @@ class _ShellScreenState extends State<ShellScreen> {
                 if (_paletteOpen)
                   _CommandPalette(
                     profiles: _profiles,
+                    tabs: _tabs,
+                    activeTabIndex: _activeIdx,
                     onClose: _closePalette,
                     onOpenProfile: (p) {
                       _closePalette();
                       setState(() => _selectedProfileId = p.id);
                       _connectSelected();
+                    },
+                    onSwitchTab: (idx) {
+                      _closePalette();
+                      _switchTab(idx);
                     },
                     onView: (v) {
                       _closePalette();
@@ -1103,6 +3133,90 @@ class _ShellScreenState extends State<ShellScreen> {
                       _closePalette();
                       _openProfileDialog();
                     },
+                    onQuickConnect: () {
+                      _closePalette();
+                      _openQuickConnectDialog();
+                    },
+                    onRestoreLayout: () {
+                      _closePalette();
+                      _restoreLastLayout();
+                    },
+                    onToggleSidebar: () {
+                      _closePalette();
+                      setState(() => _sidebarCollapsed = !_sidebarCollapsed);
+                      _saveDesktopState();
+                    },
+                    onRenameTab: () {
+                      _closePalette();
+                      _renameTabGroup(_activeIdx);
+                    },
+                    onDuplicateTab: () {
+                      _closePalette();
+                      _duplicateTabGroup(_activeIdx);
+                    },
+                    onCloseOtherTabs: () {
+                      _closePalette();
+                      _closeOtherTabGroups(_activeIdx);
+                    },
+                    onCloseTabsToRight: () {
+                      _closePalette();
+                      _closeTabGroupsToRight(_activeIdx);
+                    },
+                    onPrevPane: () {
+                      _closePalette();
+                      _focusAdjacentSplitPane(-1);
+                    },
+                    onNextPane: () {
+                      _closePalette();
+                      _focusAdjacentSplitPane(1);
+                    },
+                    onToggleMaximizePane: () {
+                      _closePalette();
+                      _toggleMaximizeSplitPane();
+                    },
+                    onMoveTabLeft: () {
+                      _closePalette();
+                      _moveActiveTabGroupBy(-1);
+                    },
+                    onMoveTabRight: () {
+                      _closePalette();
+                      _moveActiveTabGroupBy(1);
+                    },
+                    onDetachTab: () {
+                      _closePalette();
+                      _detachActiveTabGroup();
+                    },
+                    onPinTab: () {
+                      _closePalette();
+                      _toggleActiveTabPin();
+                    },
+                    onClosePane: () {
+                      _closePalette();
+                      _closeActiveSession();
+                    },
+                  ),
+                for (var i = 0; i < _detachedTabs.length; i++)
+                  _DetachedSessionWindow(
+                    key: ValueKey(_detachedTabs[i].group),
+                    item: _detachedTabs[i],
+                    index: i,
+                    termFocus: _termFocus,
+                    onTermKey: _onTermKey,
+                    onMove: _moveDetachedTabGroup,
+                    onReattach: _reattachDetachedTabGroup,
+                    onClose: _closeDetachedTabGroup,
+                    onAddTab: _connectSelected,
+                    onSplitH: _splitHorizontal,
+                    onSplitV: _splitVertical,
+                    onCopy: _copyScreen,
+                    onPaste: _pasteClipboard,
+                    onWriteBytes: _writeBytes,
+                    onScrollback: _setTerminalScrollback,
+                    onReconnect: _reconnectActive,
+                    onDisconnect: _disconnectActive,
+                    scheduleResize: _scheduleResize,
+                    selectedProfile: _selectedProfile,
+                    profileById: _profileById,
                   ),
               ],
             ),
@@ -1112,12 +3226,13 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 
-  String _titleText() {
+  String _titleText(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final t = _activeTab;
     if (_view == _View.sessions && t != null) {
-      return 'Tindra · ${t.profileName}';
+      return l10n.appTitleWithProfile(t.profileName);
     }
-    return 'Tindra';
+    return l10n.appTitle;
   }
 
   Widget _mainArea() {
@@ -1143,6 +3258,7 @@ class _ShellScreenState extends State<ShellScreen> {
   // ---------------------- Views ----------------------
 
   Widget _emptySessions() {
+    final l10n = AppLocalizations.of(context);
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
@@ -1150,25 +3266,24 @@ class _ShellScreenState extends State<ShellScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _ViewHead(
-              eyebrow: 'home',
+              eyebrow: l10n.home,
               title: _greeting(),
-              lede: '${_tabs.length} live sessions · ${_profiles.length} profiles · '
-                  'sync caught up moments ago',
+              lede: l10n.liveSessionsSummary(_profiles.length, _tabs.length),
               actions: [
                 _GhostButton(
                   icon: Icons.terminal_outlined,
-                  label: 'Local shell',
+                  label: l10n.localShell,
                   onTap: _openLocalShell,
                 ),
                 _PrimaryButton(
                   icon: Icons.add,
-                  label: 'New profile',
+                  label: l10n.newProfile,
                   onTap: () => _openProfileDialog(),
                 ),
               ],
             ),
             const SizedBox(height: 24),
-            _BlockHead(title: 'Quickstart', sub: 'press ⌘K to summon the palette'),
+            _BlockHead(title: l10n.quickstart, sub: l10n.pressPaletteHint),
             Container(
               decoration: BoxDecoration(
                 color: _bg1,
@@ -1181,21 +3296,28 @@ class _ShellScreenState extends State<ShellScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 56, height: 56,
+                      width: 56,
+                      height: 56,
                       decoration: BoxDecoration(
                         color: _bg2,
                         border: Border.all(color: _line2),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       alignment: Alignment.center,
-                      child: Text(r'$', style: GoogleFonts.jetBrainsMono(
-                        fontSize: 20, color: _acc, fontWeight: FontWeight.w500)),
+                      child: Text(
+                        r'$',
+                        style: GoogleFonts.jetBrainsMono(
+                          fontSize: 20,
+                          color: _acc,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 14),
-                    Text('No open sessions', style: _display(size: 22)),
+                    Text(l10n.noOpenSessions, style: _display(size: 22)),
                     const SizedBox(height: 6),
                     Text(
-                      'Pick a profile, or press ⌘K to run a command.',
+                      l10n.pickProfileOrPalette,
                       style: _sans(color: _ink2, size: 13.5),
                     ),
                   ],
@@ -1203,10 +3325,7 @@ class _ShellScreenState extends State<ShellScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            _BlockHead(
-              title: 'Profiles',
-              tools: _filterChips(),
-            ),
+            _BlockHead(title: l10n.profiles, tools: _filterChips()),
             _profilesGrid(),
           ],
         ),
@@ -1215,22 +3334,29 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   String _greeting() {
+    final l10n = AppLocalizations.of(context);
     final h = DateTime.now().hour;
-    final phase = h < 5 ? 'evening' : h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening';
-    return 'Good $phase.';
+    if (h < 5) return l10n.goodEvening;
+    if (h < 12) return l10n.goodMorning;
+    if (h < 18) return l10n.goodAfternoon;
+    return l10n.goodEvening;
   }
 
   List<Widget> _filterChips() {
+    final l10n = AppLocalizations.of(context);
     final tags = <String>{'all'};
     for (final p in _profiles) {
-      for (final t in (p.notes.isEmpty ? <String>[] : p.notes.split(',').map((e) => e.trim()))) {
+      for (final t
+          in (p.notes.isEmpty
+              ? <String>[]
+              : p.notes.split(',').map((e) => e.trim()))) {
         if (t.isNotEmpty) tags.add(t);
       }
     }
     return [
       for (final t in tags.take(6))
         _Chip(
-          label: t,
+          label: t == 'all' ? l10n.all : t,
           on: _profileFilter == t,
           onTap: () => setState(() => _profileFilter = t),
         ),
@@ -1238,13 +3364,17 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Widget _profilesGrid() {
+    final l10n = AppLocalizations.of(context);
     if (_profilesLoading) {
       return Padding(
         padding: const EdgeInsets.all(24),
-        child: Center(child: SizedBox(
-          width: 18, height: 18,
-          child: CircularProgressIndicator(strokeWidth: 1.6, color: _acc),
-        )),
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 1.6, color: _acc),
+          ),
+        ),
       );
     }
     if (_profiles.isEmpty) {
@@ -1260,11 +3390,15 @@ class _ShellScreenState extends State<ShellScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('No profiles yet', style: _display(size: 22)),
+            Text(l10n.noProfilesYet, style: _display(size: 22)),
             const SizedBox(height: 6),
-            Text('Create one to start connecting.', style: _sans(color: _ink2)),
+            Text(l10n.pickProfilePrompt, style: _sans(color: _ink2)),
             const SizedBox(height: 14),
-            _PrimaryButton(icon: Icons.add, label: 'New profile', onTap: () => _openProfileDialog()),
+            _PrimaryButton(
+              icon: Icons.add,
+              label: l10n.newProfile,
+              onTap: () => _openProfileDialog(),
+            ),
           ],
         ),
       );
@@ -1306,37 +3440,58 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Widget _sessionView() => _SessionPane(
-        tabs: _tabs,
-        activeIdx: _activeIdx,
-        termFocus: _termFocus,
-        onTermKey: _onTermKey,
-        onCloseTab: _closeTab,
-        onSwitchTab: _switchTab,
-        onAddTab: _connectSelected,
-        onSplitH: _splitHorizontal,
-        onSplitV: _splitVertical,
-        onCopy: _copyScreen,
-        onPaste: _pasteClipboard,
-        onReconnect: _reconnectActive,
-        onDisconnect: _disconnectActive,
-        scheduleResize: _scheduleResize,
-        selectedProfile: _selectedProfile,
-        profileById: _profileById,
-      );
+    tabs: _tabs,
+    activeIdx: _activeIdx,
+    termFocus: _termFocus,
+    onTermKey: _onTermKey,
+    onCloseTab: _closeTab,
+    onSwitchTab: _switchTab,
+    onMoveTab: _moveTabGroup,
+    onDuplicateTab: _duplicateTabGroup,
+    onCloseOtherTabs: _closeOtherTabGroups,
+    onCloseTabsToRight: _closeTabGroupsToRight,
+    onRenameTab: _renameTabGroup,
+    onTogglePinTab: _togglePinTabGroup,
+    onSetTabColor: _setTabGroupColor,
+    onSplitDrop: _dropTabGroupIntoSplit,
+    onDetachDrop: _detachTabGroup,
+    onResizeSplit: _resizeSplit,
+    onActivateSplit: _activateSplitPane,
+    onFocusPrevSplit: () => _focusAdjacentSplitPane(-1),
+    onFocusNextSplit: () => _focusAdjacentSplitPane(1),
+    onToggleMaximizeSplit: _toggleMaximizeSplitPane,
+    onAddTab: _connectSelected,
+    onSplitH: _splitHorizontal,
+    onSplitV: _splitVertical,
+    onCopy: _copyScreen,
+    onPaste: _pasteClipboard,
+    onOpenUrl: _openTerminalUrl,
+    onWriteBytes: _writeBytes,
+    onScrollback: _setTerminalScrollback,
+    onReconnect: _reconnectActive,
+    onDisconnect: _disconnectActive,
+    scheduleResize: _scheduleResize,
+    selectedProfile: _selectedProfile,
+    profileById: _profileById,
+  );
 
   Widget _profilesView() {
+    final l10n = AppLocalizations.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ViewHead(
-            eyebrow: 'profiles',
-            title: '${_profiles.length} profiles',
-            lede: 'Local-only · encrypted at rest with age. Pair another device to sync.',
+            eyebrow: l10n.profiles,
+            title: l10n.profileCount(_profiles.length),
+            lede: l10n.profilesLede,
             actions: [
-              _GhostButton(icon: Icons.key_outlined, label: 'Import keys', onTap: () {}),
-              _PrimaryButton(icon: Icons.add, label: 'New profile', onTap: () => _openProfileDialog()),
+              _PrimaryButton(
+                icon: Icons.add,
+                label: l10n.newProfile,
+                onTap: () => _openProfileDialog(),
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -1350,7 +3505,8 @@ class _ShellScreenState extends State<ShellScreen> {
             onDelete: _deleteProfile,
           ),
           const SizedBox(height: 8),
-          if (_selectedProfile != null) _selectedProfileFooter(_selectedProfile!),
+          if (_selectedProfile != null)
+            _selectedProfileFooter(_selectedProfile!),
         ],
       ),
     );
@@ -1359,25 +3515,35 @@ class _ShellScreenState extends State<ShellScreen> {
   /// Hidden affordance the integration tests rely on: a button labelled
   /// `Open profileName` mirroring the tab-bar trailing plus button.
   Widget _selectedProfileFooter(rust.Profile p) {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Tooltip(
-            message: 'Open ${p.name}',
+            message: l10n.openProfile(p.name),
             child: FilledButton.icon(
               onPressed: _connectSelected,
               icon: const Icon(Icons.play_arrow_rounded, size: 16),
               label: Text(
-                'Open ${p.name}',
-                style: _sans(size: 13, weight: FontWeight.w600, color: _isLight ? Colors.white : _Pal.dBg0),
+                l10n.openProfile(p.name),
+                style: _sans(
+                  size: 13,
+                  weight: FontWeight.w600,
+                  color: _isLight ? Colors.white : _Pal.dBg0,
+                ),
               ),
               style: FilledButton.styleFrom(
                 backgroundColor: _ink0,
                 foregroundColor: _isLight ? Colors.white : _Pal.dBg0,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
               ),
             ),
           ),
@@ -1387,11 +3553,10 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Widget _filesView() => _FilesView(profiles: _profiles);
-  Widget _forwardsView() => _ForwardsView(profiles: _profiles, selectedProfile: _selectedProfile);
+  Widget _forwardsView() =>
+      _ForwardsView(profiles: _profiles, selectedProfile: _selectedProfile);
   Widget _keysView() => const _KeysView();
-  Widget _settingsView() => _SettingsView(
-        onSave: _saveSettings,
-      );
+  Widget _settingsView() => _SettingsView(onSave: _saveSettings);
 }
 
 extension<T> on Iterable<T> {
@@ -1399,1325 +3564,7 @@ extension<T> on Iterable<T> {
 }
 
 // ============================================================================
-// Title bar
-// ============================================================================
-
-class _TitleBar extends StatelessWidget {
-  const _TitleBar({required this.title, required this.onPalette});
-  final String title;
-  final VoidCallback onPalette;
-
-  @override
-  Widget build(BuildContext context) {
-    return DragToMoveArea(
-      child: Container(
-        height: 36,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [_bg1, _bg0],
-          ),
-          border: Border(bottom: BorderSide(color: _line)),
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 14),
-            const _TrafficLights(),
-            Expanded(
-              child: Center(
-                child: Text(
-                  title,
-                  style: _mono(size: 12, color: _ink2, letterSpacing: 0.3),
-                ),
-              ),
-            ),
-            DragToMoveArea(child: const SizedBox(width: 0)),
-            _IconBtn(icon: Icons.search, tooltip: '⌘K', onTap: onPalette),
-            const SizedBox(width: 8),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TrafficLights extends StatelessWidget {
-  const _TrafficLights();
-  @override
-  Widget build(BuildContext context) {
-    Widget dot(Color c) => Container(
-      width: 12, height: 12,
-      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
-    );
-    return Row(
-      children: [
-        InkWell(onTap: () async => windowManager.close(), child: dot(const Color(0xFFEC6A5E))),
-        const SizedBox(width: 8),
-        InkWell(onTap: () async => windowManager.minimize(), child: dot(const Color(0xFFF4BF4F))),
-        const SizedBox(width: 8),
-        InkWell(onTap: () async {
-          if (await windowManager.isMaximized()) {
-            await windowManager.unmaximize();
-          } else {
-            await windowManager.maximize();
-          }
-        }, child: dot(const Color(0xFF61C554))),
-      ],
-    );
-  }
-}
-
-class _IconBtn extends StatefulWidget {
-  const _IconBtn({required this.icon, required this.onTap, this.tooltip, this.iconSize = 14, this.danger = false});
-  final IconData icon;
-  final VoidCallback? onTap;
-  final String? tooltip;
-  final double iconSize;
-  final bool danger;
-  static const double size = 28;
-
-  @override
-  State<_IconBtn> createState() => _IconBtnState();
-}
-
-class _IconBtnState extends State<_IconBtn> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    final color = !_hover
-        ? _ink2
-        : (widget.danger ? _Pal.cRose : _ink0);
-    final btn = MouseRegion(
-      cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          width: _IconBtn.size, height: _IconBtn.size,
-          decoration: BoxDecoration(
-            color: _hover ? _bg2 : null,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          alignment: Alignment.center,
-          child: Icon(widget.icon, size: widget.iconSize, color: color),
-        ),
-      ),
-    );
-    if (widget.tooltip == null) return btn;
-    return Tooltip(message: widget.tooltip!, child: btn);
-  }
-}
-
-// ============================================================================
-// Sidebar
-// ============================================================================
-
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({
-    required this.view,
-    required this.sessionsCount,
-    required this.onView,
-    required this.onPalette,
-  });
-
-  final _View view;
-  final int sessionsCount;
-  final ValueChanged<_View> onView;
-  final VoidCallback onPalette;
-
-  @override
-  Widget build(BuildContext context) {
-    final items = <_NavSpec>[
-      _NavSpec(_View.sessions, Icons.terminal_outlined, 'Sessions', sessionsCount > 0 ? '$sessionsCount' : null),
-      _NavSpec(_View.profiles, Icons.public, 'Profiles', null),
-      _NavSpec(_View.files, Icons.folder_outlined, 'Files', null),
-      _NavSpec(_View.forwards, Icons.swap_horiz, 'Forwards', null),
-      _NavSpec(_View.keys, Icons.vpn_key_outlined, 'Host keys', null),
-      _NavSpec(_View.settings, Icons.tune, 'Settings', null),
-    ];
-    return Container(
-      width: 230,
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border(right: BorderSide(color: _line)),
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _Brand(),
-          const SizedBox(height: 14),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                for (final it in items)
-                  _NavItem(
-                    spec: it,
-                    active: it.view == view,
-                    onTap: () => onView(it.view),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          _PaletteTrigger(onTap: onPalette),
-          const SizedBox(height: 10),
-          const _SyncRow(),
-        ],
-      ),
-    );
-  }
-}
-
-class _NavSpec {
-  const _NavSpec(this.view, this.icon, this.label, this.badge);
-  final _View view;
-  final IconData icon;
-  final String label;
-  final String? badge;
-}
-
-class _Brand extends StatelessWidget {
-  const _Brand();
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: Row(
-        children: [
-          _BrandLogo(accent: _acc),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Tindra',
-                style: _display(size: 19, weight: FontWeight.w600, color: _ink0, letterSpacing: -0.2),
-              ),
-              const SizedBox(height: 1),
-              Text(
-                'V0.1 · EARLY',
-                style: _mono(size: 10, color: _ink3, letterSpacing: 1.3, weight: FontWeight.w500),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BrandLogo extends StatelessWidget {
-  const _BrandLogo({required this.accent});
-  final Color accent;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 28, height: 28,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            accent,
-            Color.lerp(accent, Colors.black, 0.25)!,
-          ],
-        ),
-        border: Border.all(color: Color.lerp(accent, Colors.black, 0.5)!),
-      ),
-      alignment: Alignment.center,
-      child: Transform.rotate(
-        angle: 0.785398, // 45deg
-        child: Container(
-          width: 10, height: 10,
-          decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: _Pal.dInk0, width: 2),
-              left: BorderSide(color: _Pal.dInk0, width: 2),
-            ),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(2),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatefulWidget {
-  const _NavItem({required this.spec, required this.active, required this.onTap});
-  final _NavSpec spec;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  State<_NavItem> createState() => _NavItemState();
-}
-
-class _NavItemState extends State<_NavItem> {
-  bool _hover = false;
-
-  Widget? _badgeChip(bool active) {
-    final b = widget.spec.badge;
-    if (b == null) return null;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-      decoration: BoxDecoration(
-        color: active ? _accSoft : _bg3,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(b, style: _mono(size: 10, color: active ? _acc : _ink1, weight: FontWeight.w500)),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final active = widget.active;
-    final hovering = _hover && !active;
-    final bg = active ? _bg2 : (hovering ? _bg2 : Colors.transparent);
-    final color = active ? _ink0 : (hovering ? _ink1 : _ink2);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(6),
-            border: Border(
-              left: BorderSide(color: active ? _acc : Colors.transparent, width: 2),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(widget.spec.icon, size: 17, color: color),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  widget.spec.label,
-                  style: _sans(size: 13.5, color: color, weight: FontWeight.w500),
-                ),
-              ),
-              ?_badgeChip(active),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PaletteTrigger extends StatefulWidget {
-  const _PaletteTrigger({required this.onTap});
-  final VoidCallback onTap;
-  @override
-  State<_PaletteTrigger> createState() => _PaletteTriggerState();
-}
-
-class _PaletteTriggerState extends State<_PaletteTrigger> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          decoration: BoxDecoration(
-            color: _bg2,
-            border: Border.all(color: _hover ? _line2 : _line),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.search, size: 14, color: _hover ? _ink1 : _ink2),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Search · run',
-                  style: _sans(size: 12.5, color: _hover ? _ink1 : _ink2),
-                ),
-              ),
-              _Kbd('⌘K'),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SyncRow extends StatelessWidget {
-  const _SyncRow();
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 7, height: 7,
-            decoration: BoxDecoration(
-              color: _Pal.cEmerald,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(color: _Pal.cEmerald.withValues(alpha: 0.18), blurRadius: 0, spreadRadius: 3),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text('sync · ', style: _mono(size: 11, color: _ink3)),
-          Text('paired (2)', style: _mono(size: 11, color: _ink1)),
-        ],
-      ),
-    );
-  }
-}
-
-class _Kbd extends StatelessWidget {
-  const _Kbd(this.text);
-  final String text;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(
-        color: _bg3,
-        border: Border.all(color: _line2),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(text, style: _mono(size: 11, color: _ink1)),
-    );
-  }
-}
-
-// ============================================================================
-// Intents
-// ============================================================================
-
-class _NewTabIntent extends Intent { const _NewTabIntent(); }
-class _CloseTabIntent extends Intent { const _CloseTabIntent(); }
-class _NextTabIntent extends Intent { const _NextTabIntent(); }
-class _PrevTabIntent extends Intent { const _PrevTabIntent(); }
-class _SettingsIntent extends Intent { const _SettingsIntent(); }
-class _PaletteIntent extends Intent { const _PaletteIntent(); }
-class _SplitHorizontalIntent extends Intent { const _SplitHorizontalIntent(); }
-class _SplitVerticalIntent extends Intent { const _SplitVerticalIntent(); }
-class _CopyScreenIntent extends Intent { const _CopyScreenIntent(); }
-class _PasteClipboardIntent extends Intent { const _PasteClipboardIntent(); }
-class _ReconnectIntent extends Intent { const _ReconnectIntent(); }
-
-// ============================================================================
-// Command palette
-// ============================================================================
-
-class _CommandPalette extends StatefulWidget {
-  const _CommandPalette({
-    required this.profiles,
-    required this.onClose,
-    required this.onOpenProfile,
-    required this.onView,
-    required this.onLocalShell,
-    required this.onSplitH,
-    required this.onSplitV,
-    required this.onNewProfile,
-  });
-  final List<rust.Profile> profiles;
-  final VoidCallback onClose;
-  final ValueChanged<rust.Profile> onOpenProfile;
-  final ValueChanged<_View> onView;
-  final VoidCallback onLocalShell;
-  final VoidCallback onSplitH;
-  final VoidCallback onSplitV;
-  final VoidCallback onNewProfile;
-
-  @override
-  State<_CommandPalette> createState() => _CommandPaletteState();
-}
-
-class _CommandPaletteState extends State<_CommandPalette> {
-  final _q = TextEditingController();
-  final _focus = FocusNode();
-  late final List<_PaletteCmd> _cmds;
-
-  @override
-  void initState() {
-    super.initState();
-    _cmds = [
-      _PaletteCmd(icon: Icons.add, label: 'New profile', hint: '⌘N', run: widget.onNewProfile),
-      _PaletteCmd(icon: Icons.terminal_outlined, label: 'Open local shell', hint: '⌘L', run: widget.onLocalShell),
-      _PaletteCmd(icon: Icons.splitscreen_outlined, label: 'Split right', hint: '⌘⇧H', run: widget.onSplitH),
-      _PaletteCmd(icon: Icons.horizontal_split_outlined, label: 'Split down', hint: '⌘⇧E', run: widget.onSplitV),
-      _PaletteCmd(icon: Icons.folder_outlined, label: 'Toggle SFTP browser', hint: '⌘B', run: () => widget.onView(_View.files)),
-      _PaletteCmd(icon: Icons.swap_horiz, label: 'Forwards', hint: null, run: () => widget.onView(_View.forwards)),
-      _PaletteCmd(icon: Icons.vpn_key_outlined, label: 'Host keys', hint: null, run: () => widget.onView(_View.keys)),
-      _PaletteCmd(icon: Icons.tune, label: 'Settings', hint: '⌘,', run: () => widget.onView(_View.settings)),
-    ];
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
-  }
-
-  @override
-  void dispose() {
-    _q.dispose();
-    _focus.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final q = _q.text.toLowerCase();
-    final profMatches = widget.profiles.where((p) =>
-      q.isEmpty || p.name.toLowerCase().contains(q) || p.host.toLowerCase().contains(q)).toList();
-    final cmdMatches = _cmds.where((c) => q.isEmpty || c.label.toLowerCase().contains(q)).toList();
-
-    return Material(
-      color: Colors.transparent,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: widget.onClose,
-              child: Container(color: const Color(0x95080604)),
-            ),
-          ),
-          Align(
-            alignment: Alignment.topCenter,
-            child: Padding(
-              padding: EdgeInsets.only(top: MediaQuery.of(context).size.height * 0.10),
-              child: GestureDetector(
-                onTap: () {},
-                child: Container(
-                  width: 640,
-                  decoration: BoxDecoration(
-                    color: _bg1,
-                    border: Border.all(color: _line2),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 40, offset: const Offset(0, 12)),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _line))),
-                        child: Row(
-                          children: [
-                            Icon(Icons.search, size: 16, color: _ink2),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: TextField(
-                                focusNode: _focus,
-                                controller: _q,
-                                onChanged: (_) => setState(() {}),
-                                onSubmitted: (_) {
-                                  if (profMatches.isNotEmpty) {
-                                    widget.onOpenProfile(profMatches.first);
-                                  } else if (cmdMatches.isNotEmpty) {
-                                    cmdMatches.first.run();
-                                  }
-                                },
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  filled: false,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  hintText: 'Run a command, or jump to a profile…',
-                                  hintStyle: _display(size: 22, color: _ink3, weight: FontWeight.w500),
-                                ),
-                                style: _display(size: 22, color: _ink0, weight: FontWeight.w500),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            _Kbd('esc'),
-                          ],
-                        ),
-                      ),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 360),
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (profMatches.isNotEmpty) _section('PROFILES'),
-                              for (final p in profMatches.take(5))
-                                _palItem(
-                                  leading: _BarMark(accent: _accentForProfile(p)),
-                                  title: p.name,
-                                  sub: '${p.username}@${p.host}',
-                                  hint: '⏎ open',
-                                  onTap: () => widget.onOpenProfile(p),
-                                ),
-                              if (cmdMatches.isNotEmpty) _section('COMMANDS'),
-                              for (final c in cmdMatches)
-                                _palItem(
-                                  leading: Icon(c.icon, size: 14, color: _ink2),
-                                  title: c.label,
-                                  sub: null,
-                                  hint: c.hint,
-                                  onTap: () { widget.onClose(); c.run(); },
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                        decoration: BoxDecoration(border: Border(top: BorderSide(color: _line))),
-                        child: Row(
-                          children: [
-                            _Kbd('↑↓'), const SizedBox(width: 6), Text('navigate', style: _mono(size: 10.5, color: _ink3)),
-                            const SizedBox(width: 14),
-                            _Kbd('⏎'), const SizedBox(width: 6), Text('select', style: _mono(size: 10.5, color: _ink3)),
-                            const Spacer(),
-                            _Kbd('⌘K'), const SizedBox(width: 6), Text('close', style: _mono(size: 10.5, color: _ink3)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _section(String label) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-        child: Text(label, style: _mono(size: 10, color: _ink3, letterSpacing: 1.5, weight: FontWeight.w500)),
-      );
-
-  Widget _palItem({required Widget leading, required String title, required String? sub, required String? hint, required VoidCallback onTap}) {
-    return _PalItem(leading: leading, title: title, sub: sub, hint: hint, onTap: onTap);
-  }
-}
-
-class _PaletteCmd {
-  const _PaletteCmd({required this.icon, required this.label, required this.hint, required this.run});
-  final IconData icon;
-  final String label;
-  final String? hint;
-  final VoidCallback run;
-}
-
-class _PalItem extends StatefulWidget {
-  const _PalItem({required this.leading, required this.title, required this.sub, required this.hint, required this.onTap});
-  final Widget leading;
-  final String title;
-  final String? sub;
-  final String? hint;
-  final VoidCallback onTap;
-  @override
-  State<_PalItem> createState() => _PalItemState();
-}
-
-class _PalItemState extends State<_PalItem> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 9, 16, 9),
-          decoration: BoxDecoration(
-            color: _hover ? _bg2 : null,
-            border: Border(left: BorderSide(color: _hover ? _acc : Colors.transparent, width: 2)),
-          ),
-          child: Row(
-            children: [
-              SizedBox(width: 16, child: Center(child: widget.leading)),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(widget.title, style: _sans(size: 13.5, color: _ink0, weight: FontWeight.w500)),
-                    if (widget.sub != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 1),
-                        child: Text(widget.sub!, style: _mono(size: 11.5, color: _ink3)),
-                      ),
-                  ],
-                ),
-              ),
-              if (widget.hint != null) Text(widget.hint!, style: _mono(size: 11, color: _ink3)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Session pane: tab strip + terminal + footer
-// ============================================================================
-
-class _SessionPane extends StatelessWidget {
-  const _SessionPane({
-    required this.tabs,
-    required this.activeIdx,
-    required this.termFocus,
-    required this.onTermKey,
-    required this.onCloseTab,
-    required this.onSwitchTab,
-    required this.onAddTab,
-    required this.onSplitH,
-    required this.onSplitV,
-    required this.onCopy,
-    required this.onPaste,
-    required this.onReconnect,
-    required this.onDisconnect,
-    required this.scheduleResize,
-    required this.selectedProfile,
-    required this.profileById,
-  });
-
-  final List<_TabGroup> tabs;
-  final int activeIdx;
-  final FocusNode termFocus;
-  final KeyEventResult Function(FocusNode, KeyEvent) onTermKey;
-  final Future<void> Function(int) onCloseTab;
-  final void Function(int) onSwitchTab;
-  final Future<void> Function() onAddTab;
-  final Future<void> Function() onSplitH;
-  final Future<void> Function() onSplitV;
-  final Future<void> Function() onCopy;
-  final Future<void> Function() onPaste;
-  final Future<void> Function() onReconnect;
-  final Future<void> Function() onDisconnect;
-  final void Function(int, int) scheduleResize;
-  final rust.Profile? selectedProfile;
-  final rust.Profile? Function(String) profileById;
-
-  @override
-  Widget build(BuildContext context) {
-    final group = (activeIdx >= 0 && activeIdx < tabs.length) ? tabs[activeIdx] : null;
-    final tab = group?.active;
-    final profile = tab == null
-        ? null
-        : (tab.profileId == _localShellProfileId
-            ? null
-            : profileById(tab.profileId));
-    return Column(
-      children: [
-        _TabStrip(
-          tabs: tabs,
-          activeIdx: activeIdx,
-          onSwitch: onSwitchTab,
-          onClose: onCloseTab,
-          onAdd: onAddTab,
-          onSplitH: onSplitH,
-          onSplitV: onSplitV,
-          selectedProfile: selectedProfile,
-          profileById: profileById,
-        ),
-        Expanded(
-          child: Container(
-            color: _tBg,
-            child: Column(
-              children: [
-                if (tab != null)
-                  _TermMeta(
-                    tab: tab,
-                    profile: profile,
-                    onCopy: onCopy,
-                    onPaste: onPaste,
-                    onReconnect: onReconnect,
-                  ),
-                Expanded(
-                  child: Focus(
-                    focusNode: termFocus,
-                    autofocus: false,
-                    onKeyEvent: onTermKey,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: termFocus.requestFocus,
-                      child: _splitView(group),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        _SessionFooter(tab: tab, profile: profile),
-      ],
-    );
-  }
-
-  Widget _splitView(_TabGroup? group) {
-    if (group == null || group.sessions.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    if (group.sessions.length == 1) {
-      return _termBody(group.sessions.first, true);
-    }
-    final children = <Widget>[];
-    for (var i = 0; i < group.sessions.length; i++) {
-      final s = group.sessions[i];
-      final isActive = i == group.activeIdx;
-      children.add(Expanded(
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: isActive ? _acc : _line,
-              width: isActive ? 1.4 : 1,
-            ),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          margin: const EdgeInsets.all(4),
-          child: _termBody(s, isActive),
-        ),
-      ));
-    }
-    return group.splitAxis == Axis.horizontal
-        ? Row(children: children)
-        : Column(children: children);
-  }
-
-  Widget _termBody(_SessionTab tab, bool isFocused) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final probe = TextPainter(
-          text: TextSpan(text: 'M', style: _termStyle),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        final charWidth = probe.width;
-        final lineHeight = probe.height;
-        probe.dispose();
-
-        const padding = 14.0;
-        final availW = constraints.maxWidth - padding * 2;
-        final availH = constraints.maxHeight - padding * 2;
-        final fitCols = (availW / charWidth).floor().clamp(20, 400);
-        final fitRows = (availH / lineHeight).floor().clamp(8, 200);
-
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          scheduleResize(fitCols, fitRows);
-        });
-
-        return Padding(
-          padding: const EdgeInsets.all(padding),
-          child: _CellGrid(
-            tab: tab,
-            isFocused: isFocused && termFocus.hasFocus,
-            charWidth: charWidth,
-            lineHeight: lineHeight,
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _TabStrip extends StatelessWidget {
-  const _TabStrip({
-    required this.tabs,
-    required this.activeIdx,
-    required this.onSwitch,
-    required this.onClose,
-    required this.onAdd,
-    required this.onSplitH,
-    required this.onSplitV,
-    required this.selectedProfile,
-    required this.profileById,
-  });
-
-  final List<_TabGroup> tabs;
-  final int activeIdx;
-  final void Function(int) onSwitch;
-  final Future<void> Function(int) onClose;
-  final Future<void> Function() onAdd;
-  final Future<void> Function() onSplitH;
-  final Future<void> Function() onSplitV;
-  final rust.Profile? selectedProfile;
-  final rust.Profile? Function(String) profileById;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 38,
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border(bottom: BorderSide(color: _line)),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 8),
-          Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: tabs.length + 1,
-              itemBuilder: (context, i) {
-                if (i == tabs.length) {
-                  return _addTabButton();
-                }
-                return _TabPill(
-                  group: tabs[i],
-                  index: i,
-                  active: i == activeIdx,
-                  accent: _accentForGroup(tabs[i]),
-                  onTap: () => onSwitch(i),
-                  onClose: () => onClose(i),
-                );
-              },
-            ),
-          ),
-          _IconBtn(icon: Icons.splitscreen_outlined, tooltip: 'Split right', onTap: () => onSplitH()),
-          _IconBtn(icon: Icons.horizontal_split_outlined, tooltip: 'Split down', onTap: () => onSplitV()),
-          const SizedBox(width: 4),
-        ],
-      ),
-    );
-  }
-
-  Color _accentForGroup(_TabGroup g) {
-    final id = g.sessions.first.profileId;
-    if (id == _localShellProfileId) return _Pal.cSlate;
-    final p = profileById(id);
-    if (p == null) return _acc;
-    return _accentForProfile(p);
-  }
-
-  Widget _addTabButton() {
-    final tooltip = selectedProfile == null
-        ? 'Pick a profile to open'
-        : 'Open ${selectedProfile!.name}';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      child: Tooltip(
-        message: tooltip,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: selectedProfile == null ? null : onAdd,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Icon(Icons.add, size: 14, color: _ink3),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TabPill extends StatefulWidget {
-  const _TabPill({
-    required this.group,
-    required this.index,
-    required this.active,
-    required this.accent,
-    required this.onTap,
-    required this.onClose,
-  });
-
-  final _TabGroup group;
-  final int index;
-  final bool active;
-  final Color accent;
-  final VoidCallback onTap;
-  final VoidCallback onClose;
-
-  @override
-  State<_TabPill> createState() => _TabPillState();
-}
-
-class _TabPillState extends State<_TabPill> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.group.active;
-    final color = widget.active ? _ink0 : (_hover ? _ink1 : _ink2);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Container(
-        margin: const EdgeInsets.only(right: 2, top: 0, bottom: 0),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              color: widget.active ? _bg0 : (_hover ? _bg2 : Colors.transparent),
-              border: widget.active
-                  ? Border(
-                      top: BorderSide(color: widget.accent, width: 2),
-                      left: BorderSide(color: _line),
-                      right: BorderSide(color: _line),
-                    )
-                  : null,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(6),
-                topRight: Radius.circular(6),
-              ),
-            ),
-            padding: EdgeInsets.fromLTRB(12, widget.active ? 6 : 8, 10, 7),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 6×6 status dot — integration tests count these as "tabs".
-                Container(
-                  width: 6, height: 6,
-                  constraints: const BoxConstraints.tightFor(width: 6, height: 6),
-                  decoration: BoxDecoration(
-                    color: _stateColor(s.state, widget.accent),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  widget.group.sessions.length > 1
-                      ? '${widget.group.profileName} ·${widget.group.sessions.length}'
-                      : widget.group.profileName,
-                  style: _mono(size: 12.5, color: color, weight: widget.active ? FontWeight.w500 : FontWeight.w400),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  key: ValueKey('tab-close-${widget.index}'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: widget.onClose,
-                  child: Padding(
-                    padding: const EdgeInsets.all(2),
-                    child: Icon(Icons.close, size: 11, color: _ink3),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _stateColor(_ConnState s, Color accent) {
-    switch (s) {
-      case _ConnState.connecting: return _Pal.cAmber;
-      case _ConnState.connected:
-        // The integration tests assert against the design's emerald shade.
-        return _Pal.cEmerald;
-      case _ConnState.disconnected: return _Pal.cRose;
-    }
-  }
-}
-
-class _TermMeta extends StatelessWidget {
-  const _TermMeta({required this.tab, required this.profile, required this.onCopy, required this.onPaste, required this.onReconnect});
-  final _SessionTab tab;
-  final rust.Profile? profile;
-  final Future<void> Function() onCopy;
-  final Future<void> Function() onPaste;
-  final Future<void> Function() onReconnect;
-
-  @override
-  Widget build(BuildContext context) {
-    final connected = tab.state == _ConnState.connected;
-    return Container(
-      height: 38,
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border(bottom: BorderSide(color: _line)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Row(
-        children: [
-          if (connected) ...[
-            Container(
-              width: 6, height: 6,
-              decoration: BoxDecoration(
-                color: _Pal.cEmerald,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: _Pal.cEmerald.withValues(alpha: 0.2), blurRadius: 0, spreadRadius: 3)],
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text('connected', style: _mono(size: 11.5, color: _Pal.cEmerald)),
-          ] else if (tab.state == _ConnState.connecting) ...[
-            SizedBox(
-              width: 12, height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.4, color: _Pal.cAmber),
-            ),
-            const SizedBox(width: 6),
-            Text('connecting', style: _mono(size: 11.5, color: _Pal.cAmber)),
-          ] else ...[
-            Container(
-              width: 6, height: 6,
-              decoration: BoxDecoration(color: _Pal.cRose, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 6),
-            Text('offline', style: _mono(size: 11.5, color: _Pal.cRose)),
-          ],
-          const SizedBox(width: 12),
-          Container(width: 1, height: 12, color: _line),
-          const SizedBox(width: 12),
-          if (profile != null) ...[
-            Text(
-              '${profile!.username}@${profile!.host}',
-              style: _mono(size: 11.5, color: _ink1),
-            ),
-            if (profile!.jumpHost.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Text('↳ via ${profile!.jumpHost}', style: _mono(size: 11.5, color: _acc)),
-            ],
-          ] else
-            Text(tab.profileName, style: _mono(size: 11.5, color: _ink1)),
-          const Spacer(),
-          _IconBtn(icon: Icons.copy_outlined, tooltip: 'Copy', onTap: () => onCopy(), iconSize: 13),
-          _IconBtn(icon: Icons.content_paste_outlined, tooltip: 'Paste', onTap: () => onPaste(), iconSize: 13),
-          _IconBtn(icon: Icons.replay_outlined, tooltip: 'Reconnect', onTap: () => onReconnect(), iconSize: 13),
-        ],
-      ),
-    );
-  }
-}
-
-class _SessionFooter extends StatelessWidget {
-  const _SessionFooter({required this.tab, required this.profile});
-  final _SessionTab? tab;
-  final rust.Profile? profile;
-
-  @override
-  Widget build(BuildContext context) {
-    final connected = tab?.state == _ConnState.connected;
-    final snap = tab?.snapshot;
-    final transport = profile == null
-        ? (tab?.profileId == _localShellProfileId ? 'PTY' : '—')
-        : (profile!.transport.isEmpty ? 'SSH' : profile!.transport.toUpperCase());
-    return Container(
-      height: 26,
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border(top: BorderSide(color: _line)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Row(
-        children: [
-          if (connected)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 6, height: 6, decoration: BoxDecoration(color: _Pal.cEmerald, shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                Text('$transport · 256/256', style: _mono(size: 11, color: _Pal.cEmerald)),
-              ],
-            )
-          else
-            Text(transport, style: _mono(size: 11, color: _ink3)),
-          if (profile != null) ...[
-            _footSep(),
-            Text('${profile!.username}@${profile!.host}:${profile!.port}', style: _mono(size: 11, color: _ink2)),
-          ],
-          if (tab != null) ...[
-            _footSep(),
-            Text('started ${_fmtTime(tab!.startedAt)}', style: _mono(size: 11, color: _ink3)),
-          ],
-          const Spacer(),
-          Text('UTF-8', style: _mono(size: 11, color: _ink3)),
-          _footSep(),
-          Text('${appSettings.value.fontFamily} · ${appSettings.value.fontSize.toStringAsFixed(0)}',
-              style: _mono(size: 11, color: _ink3)),
-          if (snap != null) ...[
-            _footSep(),
-            Text('${snap.cols}×${snap.rows}', style: _mono(size: 11, color: _ink3)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _footSep() => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Text('·', style: _mono(size: 11, color: _ink3.withValues(alpha: 0.5))),
-      );
-
-  String _fmtTime(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
-}
-
-// ============================================================================
-// Cell grid — terminal renderer
-// ============================================================================
-
-class _CellGrid extends StatelessWidget {
-  const _CellGrid({
-    required this.tab,
-    required this.isFocused,
-    required this.charWidth,
-    required this.lineHeight,
-  });
-
-  final _SessionTab tab;
-  final bool isFocused;
-  final double charWidth;
-  final double lineHeight;
-
-  @override
-  Widget build(BuildContext context) {
-    if (tab.state == _ConnState.connecting) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 1.6, color: _Pal.cAmber)),
-            const SizedBox(height: 14),
-            Text('Connecting to ${tab.profileName}', style: _mono(size: 12, color: _ink2)),
-          ],
-        ),
-      );
-    }
-    if (tab.state == _ConnState.disconnected && tab.snapshot == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.link_off, size: 28, color: _Pal.cRose),
-            const SizedBox(height: 10),
-            Text('Disconnected', style: _mono(size: 12, color: _ink2)),
-          ],
-        ),
-      );
-    }
-    final s = tab.snapshot;
-    if (s == null) {
-      return Center(child: Text('Waiting for first chunk…', style: _mono(size: 12, color: _ink2)));
-    }
-    final spans = _buildSpans(s);
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: Text.rich(
-            TextSpan(children: spans),
-            softWrap: false,
-            style: _termStyle,
-          ),
-        ),
-        if (s.cursorVisible && tab.state == _ConnState.connected)
-          Positioned(
-            left: s.cursorCol * charWidth,
-            top: s.cursorRow * lineHeight,
-            width: charWidth,
-            height: lineHeight,
-            child: IgnorePointer(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isFocused ? _tFg.withValues(alpha: 0.85) : _tFg.withValues(alpha: 0.20),
-                  border: isFocused
-                      ? null
-                      : Border.all(color: _tFg.withValues(alpha: 0.6), width: 1),
-                ),
-              ),
-            ),
-          ),
-        if (tab.state == _ConnState.disconnected)
-          Positioned(
-            top: 6, right: 6,
-            child: IgnorePointer(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _Pal.cRose.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text('OFFLINE', style: _mono(size: 10, color: Colors.white, weight: FontWeight.w700, letterSpacing: 1.4)),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  List<TextSpan> _buildSpans(rust.TerminalSnapshot s) {
-    final spans = <TextSpan>[];
-    StringBuffer? buf;
-    TextStyle? curStyle;
-
-    void flush() {
-      if (buf != null && buf!.isNotEmpty) {
-        spans.add(TextSpan(text: buf!.toString(), style: curStyle));
-      }
-      buf = null;
-      curStyle = null;
-    }
-
-    final cols = s.cols;
-    final rows = s.rows;
-    for (int row = 0; row < rows; row++) {
-      for (int col = 0; col < cols; col++) {
-        final idx = row * cols + col;
-        if (idx >= s.cells.length) break;
-        final cell = s.cells[idx];
-        if (cell.ch.isEmpty) continue;
-        final style = _styleForCell(cell);
-        if (style != curStyle) {
-          flush();
-          curStyle = style;
-          buf = StringBuffer();
-        }
-        buf!.write(cell.ch);
-      }
-      flush();
-      if (row + 1 < rows) {
-        spans.add(const TextSpan(text: '\n'));
-      }
-    }
-    flush();
-    return spans;
-  }
-}
-
-TextStyle _styleForCell(rust.Cell c) {
-  final inverse = (c.attrs & 8) != 0;
-  Color fg = c.fg.default_ ? _tFg : Color.fromARGB(255, c.fg.r, c.fg.g, c.fg.b);
-  Color? bg = c.bg.default_ ? null : Color.fromARGB(255, c.bg.r, c.bg.g, c.bg.b);
-  if (inverse) {
-    final tmpFg = fg;
-    fg = bg ?? _tBg;
-    bg = tmpFg;
-  }
-  final base = _termStyle;
-  return base.copyWith(
-    color: fg,
-    backgroundColor: bg,
-    fontWeight: (c.attrs & 1) != 0 ? FontWeight.bold : null,
-    fontStyle: (c.attrs & 2) != 0 ? FontStyle.italic : null,
-    decoration: (c.attrs & 4) != 0 ? TextDecoration.underline : null,
-    inherit: true,
-  );
-}
-
-// ============================================================================
-// Generic view chrome — view header, block header, chips, buttons.
+// Generic view chrome ??view header, block header, chips, buttons.
 // ============================================================================
 
 class _ViewHead extends StatelessWidget {
@@ -2745,7 +3592,14 @@ class _ViewHead extends StatelessWidget {
               children: [
                 Text(eyebrow.toUpperCase(), style: _eyebrow()),
                 const SizedBox(height: 6),
-                Text(title, style: _display(size: 36, weight: FontWeight.w500, color: _ink0)),
+                Text(
+                  title,
+                  style: _display(
+                    size: 36,
+                    weight: FontWeight.w500,
+                    color: _ink0,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 600),
@@ -2779,12 +3633,15 @@ class _BlockHead extends StatelessWidget {
     Widget? right;
     if (tools is String) right = Text(tools as String, style: _blockSub());
     if (tools is List<Widget>) {
-      right = Row(mainAxisSize: MainAxisSize.min, children: [
-        for (var i = 0; i < (tools as List).length; i++) ...[
-          if (i > 0) const SizedBox(width: 4),
-          (tools as List)[i] as Widget,
+      right = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < (tools as List).length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            (tools as List)[i] as Widget,
+          ],
         ],
-      ]);
+      );
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -2837,10 +3694,7 @@ class _ChipState extends State<_Chip> {
           ),
           child: Text(
             widget.label,
-            style: _mono(
-              size: 11,
-              color: on ? _acc : (_hover ? _ink1 : _ink2),
-            ),
+            style: _mono(size: 11, color: on ? _acc : (_hover ? _ink1 : _ink2)),
           ),
         ),
       ),
@@ -2849,7 +3703,11 @@ class _ChipState extends State<_Chip> {
 }
 
 class _PrimaryButton extends StatefulWidget {
-  const _PrimaryButton({required this.icon, required this.label, required this.onTap});
+  const _PrimaryButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
@@ -2894,7 +3752,11 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
 }
 
 class _GhostButton extends StatefulWidget {
-  const _GhostButton({required this.icon, required this.label, required this.onTap});
+  const _GhostButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
@@ -2908,7 +3770,9 @@ class _GhostButtonState extends State<_GhostButton> {
   Widget build(BuildContext context) {
     final color = _hover ? _ink0 : _ink1;
     return MouseRegion(
-      cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+      cursor: widget.onTap == null
+          ? MouseCursor.defer
+          : SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
@@ -2939,7 +3803,11 @@ class _GhostButtonState extends State<_GhostButton> {
 }
 
 class _TinyButton extends StatefulWidget {
-  const _TinyButton({required this.icon, required this.label, required this.onTap});
+  const _TinyButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
@@ -2970,7 +3838,10 @@ class _TinyButtonState extends State<_TinyButton> {
             children: [
               Icon(widget.icon, size: 11, color: _ink1),
               const SizedBox(width: 4),
-              Text(widget.label, style: _sans(size: 11.5, color: _ink1, weight: FontWeight.w500)),
+              Text(
+                widget.label,
+                style: _sans(size: 11.5, color: _ink1, weight: FontWeight.w500),
+              ),
             ],
           ),
         ),
@@ -2980,7 +3851,12 @@ class _TinyButtonState extends State<_TinyButton> {
 }
 
 class _GhostLink extends StatefulWidget {
-  const _GhostLink({required this.icon, required this.label, required this.onTap, this.danger = false});
+  const _GhostLink({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
@@ -3020,834 +3896,6 @@ class _GhostLinkState extends State<_GhostLink> {
         ),
       ),
     );
-  }
-}
-
-// ============================================================================
-// Profile card (home view)
-// ============================================================================
-
-class _ProfileCard extends StatefulWidget {
-  const _ProfileCard({
-    required this.profile,
-    required this.selected,
-    required this.dense,
-    required this.onSelect,
-    required this.onOpen,
-    required this.onEdit,
-    required this.onDelete,
-  });
-  final rust.Profile profile;
-  final bool selected;
-  final bool dense;
-  final VoidCallback onSelect;
-  final VoidCallback onOpen;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  @override
-  State<_ProfileCard> createState() => _ProfileCardState();
-}
-
-class _ProfileCardState extends State<_ProfileCard> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    final p = widget.profile;
-    final accent = _accentForProfile(p);
-    final tags = p.notes
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onSelect,
-        onDoubleTap: widget.onOpen,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: EdgeInsets.all(widget.dense ? 12 : 16),
-          decoration: BoxDecoration(
-            color: _hover ? _bg2 : _bg1,
-            border: Border.all(color: _hover ? _line2 : _line),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          transform: _hover
-              ? (Matrix4.identity()..translateByDouble(0.0, -1.0, 0.0, 1.0))
-              : Matrix4.identity(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  _BarMark(accent: accent),
-                  const Spacer(),
-                  _StatusPill(connected: false),
-                ],
-              ),
-              SizedBox(height: widget.dense ? 4 : 8),
-              Text(
-                p.name.isEmpty ? '(unnamed)' : p.name,
-                style: widget.dense
-                    ? _sans(size: 15.5, weight: FontWeight.w600, color: _ink0)
-                    : _display(size: 18, weight: FontWeight.w500, color: _ink0, letterSpacing: -0.2),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Flexible(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(text: p.username, style: _mono(size: 11.5, color: _ink1)),
-                          TextSpan(text: '@', style: _mono(size: 11.5, color: _ink3)),
-                          TextSpan(text: p.host, style: _mono(size: 11.5, color: _ink1)),
-                          if (p.port != 22 && p.port != 0)
-                            TextSpan(text: ':${p.port}', style: _mono(size: 11.5, color: _acc)),
-                        ],
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Text(
-                    (p.transport.isEmpty ? 'ssh' : p.transport).toUpperCase(),
-                    style: _mono(size: 10.5, color: _ink2, letterSpacing: 1.0),
-                  ),
-                  Text(' · ', style: _mono(size: 10.5, color: _ink3)),
-                  Text(
-                    p.authMethod.isEmpty ? 'key' : p.authMethod,
-                    style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.0),
-                  ),
-                  if (p.jumpHost.isNotEmpty) ...[
-                    Text(' · ', style: _mono(size: 10.5, color: _ink3)),
-                    Flexible(
-                      child: Text(
-                        'via ${p.jumpHost}',
-                        style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.0),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              SizedBox(height: widget.dense ? 8 : 12),
-              Container(height: 1, color: _line),
-              SizedBox(height: widget.dense ? 6 : 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: [
-                        for (final t in tags.take(3)) _Tag(t),
-                        if (tags.length > 3) _Tag('+${tags.length - 3}'),
-                      ],
-                    ),
-                  ),
-                  if (widget.selected)
-                    Tooltip(
-                      message: 'Open ${p.name}',
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: widget.onOpen,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: _acc,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'OPEN',
-                            style: _mono(
-                              size: 10,
-                              weight: FontWeight.w700,
-                              letterSpacing: 1.4,
-                              color: _isLight ? Colors.white : _Pal.dBg0,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-Color _accentForProfile(rust.Profile p) {
-  // Stable accent rotation by id hash so each card feels distinct.
-  const palette = [_Pal.cRose, _Pal.cAmber, _Pal.cEmerald, _Pal.cSky, _Pal.cViolet];
-  final h = p.id.hashCode.abs();
-  return palette[h % palette.length];
-}
-
-class _BarMark extends StatelessWidget {
-  const _BarMark({required this.accent});
-  final Color accent;
-  @override
-  Widget build(BuildContext context) {
-    Widget bar(double height, double opacity) => Container(
-          width: 3,
-          height: height,
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: opacity),
-            borderRadius: BorderRadius.circular(1),
-          ),
-        );
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        bar(14, 0.9),
-        const SizedBox(width: 2),
-        bar(9, 0.55),
-        const SizedBox(width: 2),
-        bar(5, 0.35),
-      ],
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.connected});
-  final bool connected;
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 6, height: 6,
-          decoration: BoxDecoration(
-            color: connected ? _Pal.cEmerald : _ink3,
-            shape: BoxShape.circle,
-            boxShadow: connected
-                ? [BoxShadow(color: _Pal.cEmerald.withValues(alpha: 0.22), blurRadius: 0, spreadRadius: 3)]
-                : null,
-          ),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          connected ? 'LIVE' : 'IDLE',
-          style: _mono(
-            size: 10,
-            color: connected ? _Pal.cEmerald : _ink3,
-            letterSpacing: 1.4,
-            weight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _Tag extends StatelessWidget {
-  const _Tag(this.text);
-  final String text;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-      decoration: BoxDecoration(
-        color: _bg3,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(text, style: _mono(size: 10, color: _ink2, letterSpacing: 0.4)),
-    );
-  }
-}
-
-// ============================================================================
-// Profiles table
-// ============================================================================
-
-class _ProfilesTable extends StatelessWidget {
-  const _ProfilesTable({
-    required this.profiles,
-    required this.onOpen,
-    required this.onEdit,
-    required this.onDelete,
-  });
-  final List<rust.Profile> profiles;
-  final ValueChanged<rust.Profile> onOpen;
-  final ValueChanged<rust.Profile> onEdit;
-  final ValueChanged<rust.Profile> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border.all(color: _line),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          _profHead(),
-          for (var i = 0; i < profiles.length; i++)
-            _ProfileRow(
-              profile: profiles[i],
-              last: i == profiles.length - 1,
-              onOpen: () => onOpen(profiles[i]),
-              onEdit: () => onEdit(profiles[i]),
-              onDelete: () => onDelete(profiles[i]),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _profHead() {
-    Widget cell(String s) => Text(s.toUpperCase(),
-        style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.5));
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border(bottom: BorderSide(color: _line)),
-      ),
-      child: Row(
-        children: [
-          Expanded(flex: 16, child: cell('name')),
-          Expanded(flex: 16, child: cell('host')),
-          Expanded(flex: 7, child: cell('auth')),
-          Expanded(flex: 11, child: cell('tags')),
-          Expanded(flex: 9, child: cell('last')),
-          const SizedBox(width: 110),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileRow extends StatefulWidget {
-  const _ProfileRow({
-    required this.profile,
-    required this.last,
-    required this.onOpen,
-    required this.onEdit,
-    required this.onDelete,
-  });
-  final rust.Profile profile;
-  final bool last;
-  final VoidCallback onOpen;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  @override
-  State<_ProfileRow> createState() => _ProfileRowState();
-}
-
-class _ProfileRowState extends State<_ProfileRow> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    final p = widget.profile;
-    final accent = _accentForProfile(p);
-    final tags = p.notes
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
-        decoration: BoxDecoration(
-          color: _hover ? _bg2 : null,
-          border: Border(
-            bottom: BorderSide(
-              color: widget.last ? Colors.transparent : _line,
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              flex: 16,
-              child: Row(
-                children: [
-                  Container(
-                    width: 4, height: 16,
-                    decoration: BoxDecoration(
-                      color: accent,
-                      borderRadius: BorderRadius.circular(1),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      p.name.isEmpty ? '(unnamed)' : p.name,
-                      style: _display(size: 15.5, weight: FontWeight.w500, color: _ink0, letterSpacing: -0.2),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 16,
-              child: Text(
-                '${p.username}@${p.host}${p.port != 22 && p.port != 0 ? ':${p.port}' : ''}',
-                style: _mono(size: 12, color: _ink1),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Expanded(
-              flex: 7,
-              child: Text(
-                (p.authMethod.isEmpty ? 'key' : p.authMethod).toUpperCase(),
-                style: _mono(size: 11, color: _ink2, letterSpacing: 1.0),
-              ),
-            ),
-            Expanded(
-              flex: 11,
-              child: Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: [for (final t in tags.take(3)) _Tag(t)],
-              ),
-            ),
-            Expanded(
-              flex: 9,
-              child: Text('—', style: _mono(size: 11, color: _ink3)),
-            ),
-            SizedBox(
-              width: 110,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  _TinyButton(icon: Icons.play_arrow_rounded, label: 'open', onTap: widget.onOpen),
-                  const SizedBox(width: 4),
-                  _IconBtn(icon: Icons.edit_outlined, onTap: widget.onEdit, iconSize: 13),
-                  _IconBtn(icon: Icons.delete_outline, onTap: widget.onDelete, iconSize: 13, danger: true),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Files (SFTP) view
-// ============================================================================
-
-class _FilesView extends StatefulWidget {
-  const _FilesView({required this.profiles});
-  final List<rust.Profile> profiles;
-  @override
-  State<_FilesView> createState() => _FilesViewState();
-}
-
-class _FilesViewState extends State<_FilesView> {
-  String? _selProfileId;
-  BigInt? _sessionId;
-  String _remotePath = '';
-  List<rust.SftpEntry> _remoteEntries = [];
-  String? _error;
-  bool _busy = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final ssh = widget.profiles.where((p) => p.transport == 'ssh').toList();
-    if (ssh.isNotEmpty) {
-      _selProfileId = ssh.first.id;
-      _connect();
-    }
-  }
-
-  @override
-  void dispose() {
-    final id = _sessionId;
-    _sessionId = null;
-    if (id != null) rust.sftpClose(sessionId: id);
-    super.dispose();
-  }
-
-  rust.Profile? get _profile => widget.profiles.where((p) => p.id == _selProfileId).firstOrNull;
-
-  Future<void> _connect() async {
-    final p = _profile;
-    if (p == null) return;
-    setState(() => _busy = true);
-    try {
-      final id = _sessionId;
-      if (id != null) {
-        await rust.sftpClose(sessionId: id);
-      }
-      final jump = rust.JumpHost(
-        host: p.jumpHost,
-        port: p.jumpPort == 0 ? 22 : p.jumpPort,
-        username: p.jumpUsername,
-        privateKeyPath: p.jumpPrivateKeyPath,
-        passphrase: null,
-      );
-      final sid = p.authMethod == 'agent'
-          ? await rust.openSftpAgent(host: p.host, port: p.port, username: p.username, jump: jump)
-          : await rust.openSftpPubkey(
-              host: p.host, port: p.port, username: p.username,
-              privateKeyPath: p.privateKeyPath, passphrase: null, jump: jump,
-            );
-      _sessionId = sid;
-      _remotePath = await rust.sftpHome(sessionId: sid);
-      await _refresh();
-    } catch (e) {
-      _error = e.toString();
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _refresh() async {
-    final id = _sessionId;
-    if (id == null) return;
-    try {
-      final list = await rust.sftpList(sessionId: id, path: _remotePath);
-      list.sort((a, b) {
-        if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
-      setState(() => _remoteEntries = list);
-    } catch (e) {
-      setState(() => _error = e.toString());
-    }
-  }
-
-  void _navigate(rust.SftpEntry e) {
-    if (!e.isDir) return;
-    if (e.name == '..') {
-      final idx = _remotePath.lastIndexOf('/');
-      if (idx > 0) {
-        _remotePath = _remotePath.substring(0, idx);
-      } else if (idx == 0 && _remotePath.length > 1) {
-        _remotePath = '/';
-      }
-    } else {
-      _remotePath = _remotePath.endsWith('/') ? '$_remotePath${e.name}' : '$_remotePath/${e.name}';
-    }
-    _refresh();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final segs = _remotePath.split('/').where((s) => s.isNotEmpty).toList();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _ViewHead(
-            eyebrow: 'files · sftp',
-            title: 'Browse remote',
-            lede: 'Drag in to upload, drag out to download. Transfers queue on the right.',
-            actions: [
-              if (widget.profiles.where((p) => p.transport == 'ssh').isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _bg1,
-                    border: Border.all(color: _line),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: DropdownButton<String>(
-                    value: _selProfileId,
-                    underline: const SizedBox.shrink(),
-                    isDense: true,
-                    style: _mono(size: 12, color: _ink0),
-                    dropdownColor: _bg2,
-                    items: widget.profiles
-                        .where((p) => p.transport == 'ssh')
-                        .map((p) => DropdownMenuItem(value: p.id, child: Text(p.name)))
-                        .toList(),
-                    onChanged: (v) {
-                      setState(() => _selProfileId = v);
-                      _connect();
-                    },
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              _IconBtn(
-                icon: Icons.arrow_upward,
-                tooltip: 'Up',
-                onTap: () {
-                  final entry = _remoteEntries.firstWhere(
-                    (e) => e.name == '..',
-                    orElse: () => rust.SftpEntry(
-                      name: '..', isDir: true, isSymlink: false,
-                      size: BigInt.zero, mtime: BigInt.zero, permissions: 0,
-                    ),
-                  );
-                  _navigate(entry);
-                },
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: _bg1,
-                    border: Border.all(color: _line),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    children: [
-                      Text('/', style: _mono(size: 12, color: _ink3)),
-                      for (var i = 0; i < segs.length; i++) ...[
-                        Text(segs[i], style: _mono(size: 12, color: _ink1)),
-                        if (i < segs.length - 1)
-                          Text('/', style: _mono(size: 12, color: _ink3)),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (_busy)
-                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 1.4, color: _acc)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (_error != null) _errorBanner(_error!),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _filesTable()),
-              const SizedBox(width: 16),
-              SizedBox(width: 320, child: _transfersPanel()),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _errorBanner(String e) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: _isLight ? const Color(0xFFFCEDE9) : const Color(0xFF2A1417),
-        border: Border.all(color: _Pal.cRose.withValues(alpha: 0.6)),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline, size: 14, color: _Pal.cRose),
-          const SizedBox(width: 8),
-          Expanded(child: Text(e, style: _mono(size: 11.5, color: _Pal.cRose))),
-          _IconBtn(icon: Icons.close, iconSize: 13, onTap: () => setState(() => _error = null)),
-        ],
-      ),
-    );
-  }
-
-  Widget _filesTable() {
-    return Container(
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border.all(color: _line),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _line))),
-            child: Row(
-              children: [
-                Expanded(flex: 5, child: Text('NAME', style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.5))),
-                SizedBox(width: 90, child: Text('SIZE', textAlign: TextAlign.right, style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.5))),
-                const SizedBox(width: 16),
-                SizedBox(width: 150, child: Text('MODIFIED', textAlign: TextAlign.right, style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.5))),
-              ],
-            ),
-          ),
-          if (_sessionId == null)
-            Padding(
-              padding: const EdgeInsets.all(40),
-              child: Center(
-                child: Text(
-                  widget.profiles.where((p) => p.transport == 'ssh').isEmpty
-                      ? 'Add an SSH profile to browse files.'
-                      : 'Connecting…',
-                  style: _mono(size: 12, color: _ink2),
-                ),
-              ),
-            )
-          else
-            for (var i = 0; i < _remoteEntries.length; i++)
-              _SftpRow(
-                entry: _remoteEntries[i],
-                last: i == _remoteEntries.length - 1,
-                onTap: () => _navigate(_remoteEntries[i]),
-              ),
-        ],
-      ),
-    );
-  }
-
-  Widget _transfersPanel() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _bg1,
-        border: Border.all(color: _line),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text('TRANSFERS', style: _mono(size: 11, color: _ink1, letterSpacing: 1.6, weight: FontWeight.w500)),
-              const Spacer(),
-              Text('idle', style: _mono(size: 11, color: _ink3)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(height: 1, color: _line),
-          const SizedBox(height: 14),
-          Center(
-            child: Column(
-              children: [
-                Icon(Icons.cloud_done_outlined, size: 20, color: _ink3),
-                const SizedBox(height: 6),
-                Text('No transfers in flight', style: _mono(size: 11, color: _ink3)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SftpRow extends StatefulWidget {
-  const _SftpRow({required this.entry, required this.last, required this.onTap});
-  final rust.SftpEntry entry;
-  final bool last;
-  final VoidCallback onTap;
-  @override
-  State<_SftpRow> createState() => _SftpRowState();
-}
-
-class _SftpRowState extends State<_SftpRow> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    final e = widget.entry;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-          decoration: BoxDecoration(
-            color: _hover ? _bg2 : null,
-            border: Border(
-              bottom: BorderSide(color: widget.last ? Colors.transparent : _line),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 12, height: 12,
-                margin: const EdgeInsets.only(right: 10),
-                decoration: BoxDecoration(
-                  color: e.isDir ? _acc.withValues(alpha: 0.9) : _bg3,
-                  border: e.isDir ? null : Border.all(color: _line2),
-                  borderRadius: e.isDir
-                      ? const BorderRadius.only(
-                          topLeft: Radius.circular(2),
-                          topRight: Radius.circular(4),
-                          bottomLeft: Radius.circular(4),
-                          bottomRight: Radius.circular(4),
-                        )
-                      : BorderRadius.circular(2),
-                ),
-              ),
-              Expanded(
-                flex: 5,
-                child: Text(
-                  e.name,
-                  style: _mono(size: 12.5, color: e.isDir ? _accDeep : _ink0),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              SizedBox(
-                width: 90,
-                child: Text(
-                  e.isDir ? '' : _fmtSize(e.size),
-                  textAlign: TextAlign.right,
-                  style: _mono(size: 12, color: _ink2),
-                ),
-              ),
-              const SizedBox(width: 16),
-              SizedBox(
-                width: 150,
-                child: Text(
-                  _fmtMtime(e.mtime),
-                  textAlign: TextAlign.right,
-                  style: _mono(size: 12, color: _ink2),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _fmtSize(BigInt b) {
-    final n = b.toInt();
-    if (n < 1024) return '$n B';
-    if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
-    if (n < 1024 * 1024 * 1024) return '${(n / 1024 / 1024).toStringAsFixed(1)} MB';
-    return '${(n / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
-  }
-
-  String _fmtMtime(BigInt mt) {
-    final ms = mt.toInt();
-    if (ms <= 0) return '—';
-    final dt = DateTime.fromMillisecondsSinceEpoch(ms * 1000).toLocal();
-    final y = dt.year;
-    final m = dt.month.toString().padLeft(2, '0');
-    final d = dt.day.toString().padLeft(2, '0');
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mm = dt.minute.toString().padLeft(2, '0');
-    return '$y-$m-$d $hh:$mm';
   }
 }
 
@@ -3892,21 +3940,28 @@ class _ForwardsViewState extends State<_ForwardsView> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ViewHead(
-            eyebrow: 'network · port forwards',
-            title: 'Forwards',
-            lede: 'Local (L) tunnels listen on your machine. Remote (R) listens on the host. Dynamic (D) is SOCKS.',
+            eyebrow: l10n.networkPortForwardsEyebrow,
+            title: l10n.forwards,
+            lede: l10n.forwardsLede,
             actions: [
-              _GhostButton(icon: Icons.refresh, label: 'Refresh', onTap: _refresh),
+              _GhostButton(
+                icon: Icons.refresh,
+                label: l10n.refresh,
+                onTap: _refresh,
+              ),
               _PrimaryButton(
                 icon: Icons.add,
-                label: 'New forward',
-                onTap: widget.selectedProfile == null ? null : () => _openNewDialog(widget.selectedProfile!),
+                label: l10n.newForward,
+                onTap: widget.selectedProfile == null
+                    ? null
+                    : () => _openNewDialog(widget.selectedProfile!),
               ),
             ],
           ),
@@ -3914,7 +3969,16 @@ class _ForwardsViewState extends State<_ForwardsView> {
           if (_loading)
             Padding(
               padding: const EdgeInsets.all(40),
-              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 1.6, color: _acc))),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.6,
+                    color: _acc,
+                  ),
+                ),
+              ),
             )
           else if (_forwards.isEmpty)
             Container(
@@ -3930,12 +3994,21 @@ class _ForwardsViewState extends State<_ForwardsView> {
                 children: [
                   Icon(Icons.cable_outlined, size: 28, color: _ink3),
                   const SizedBox(height: 10),
-                  Text('No active tunnels', style: _display(size: 22, color: _ink0, weight: FontWeight.w500)),
+                  Text(
+                    l10n.noActiveTunnels,
+                    style: _display(
+                      size: 22,
+                      color: _ink0,
+                      weight: FontWeight.w500,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   Text(
                     widget.selectedProfile == null
-                        ? 'Pick a profile, then create a forward.'
-                        : 'Open a local forward to ${widget.selectedProfile!.name} to get started.',
+                        ? l10n.pickProfileThenForward
+                        : l10n.openLocalForwardToProfile(
+                            widget.selectedProfile!.name,
+                          ),
                     style: _sans(size: 13, color: _ink2),
                   ),
                 ],
@@ -3973,8 +4046,13 @@ class _ForwardCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const type = 'L';
-    final typeColor = _Pal.cEmerald;
+    final l10n = AppLocalizations.of(context);
+    final isSocks = forward.kind == 'socks';
+    final isRemote = forward.kind == 'remote';
+    final type = isSocks ? 'D' : (isRemote ? 'R' : 'L');
+    final typeColor = isSocks
+        ? _Pal.cSky
+        : (isRemote ? _Pal.cAmber : _Pal.cEmerald);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -3989,19 +4067,33 @@ class _ForwardCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 28, height: 24,
+                width: 28,
+                height: 24,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Color.lerp(typeColor, _bg2, 0.84),
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text(type, style: _mono(size: 11, color: typeColor, weight: FontWeight.w700, letterSpacing: 0.4)),
+                child: Text(
+                  type,
+                  style: _mono(
+                    size: 11,
+                    color: typeColor,
+                    weight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   '${forward.localAddr}:${forward.localPort}',
-                  style: _display(size: 16, weight: FontWeight.w500, color: _ink0, letterSpacing: -0.05),
+                  style: _display(
+                    size: 16,
+                    weight: FontWeight.w500,
+                    color: _ink0,
+                    letterSpacing: -0.05,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -4009,14 +4101,30 @@ class _ForwardCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 6, height: 6,
+                    width: 6,
+                    height: 6,
                     decoration: BoxDecoration(
-                      color: _Pal.cEmerald, shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: _Pal.cEmerald.withValues(alpha: 0.2), blurRadius: 0, spreadRadius: 3)],
+                      color: _Pal.cEmerald,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: _Pal.cEmerald.withValues(alpha: 0.2),
+                          blurRadius: 0,
+                          spreadRadius: 3,
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 5),
-                  Text('OPEN', style: _mono(size: 10.5, color: _Pal.cEmerald, letterSpacing: 1.2, weight: FontWeight.w500)),
+                  Text(
+                    l10n.openStatus.toUpperCase(),
+                    style: _mono(
+                      size: 10.5,
+                      color: _Pal.cEmerald,
+                      letterSpacing: 1.2,
+                      weight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -4032,19 +4140,36 @@ class _ForwardCard extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: _endpoint('LOCAL', '${forward.localAddr}:${forward.localPort}'),
+                  child: _endpoint(
+                    isRemote ? 'REMOTE' : l10n.local.toUpperCase(),
+                    '${forward.localAddr}:${forward.localPort}',
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Column(
                     children: [
-                      Text('→', style: _mono(size: 16, color: _acc)),
-                      Text('via', style: _mono(size: 10, color: _ink3, letterSpacing: 1.0)),
+                      Text('->', style: _mono(size: 16, color: _acc)),
+                      Text(
+                        l10n.via.toLowerCase(),
+                        style: _mono(
+                          size: 10,
+                          color: _ink3,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 Expanded(
-                  child: _endpoint('REMOTE', '${forward.remoteHost}:${forward.remotePort}'),
+                  child: _endpoint(
+                    isSocks ? 'SOCKS5' : l10n.remote.toUpperCase(),
+                    isSocks
+                        ? 'dynamic target'
+                        : isRemote
+                        ? '${forward.remoteHost}:${forward.remotePort} local'
+                        : '${forward.remoteHost}:${forward.remotePort}',
+                  ),
                 ),
               ],
             ),
@@ -4054,9 +4179,12 @@ class _ForwardCard extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              _GhostLink(icon: Icons.replay_outlined, label: 'reconnect', onTap: () {}),
-              const SizedBox(width: 6),
-              _GhostLink(icon: Icons.delete_outline, label: 'drop', onTap: onStop, danger: true),
+              _GhostLink(
+                icon: Icons.delete_outline,
+                label: l10n.drop.toLowerCase(),
+                onTap: onStop,
+                danger: true,
+              ),
             ],
           ),
         ],
@@ -4070,7 +4198,11 @@ class _ForwardCard extends StatelessWidget {
       children: [
         Text(tag, style: _mono(size: 10, color: _ink3, letterSpacing: 1.3)),
         const SizedBox(height: 2),
-        Text(value, style: _mono(size: 12, color: _ink0), overflow: TextOverflow.ellipsis),
+        Text(
+          value,
+          style: _mono(size: 12, color: _ink0),
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }
@@ -4089,12 +4221,16 @@ class _ForwardDialogState extends State<_ForwardDialog> {
   final _localPort = TextEditingController(text: '0');
   final _remoteHost = TextEditingController();
   final _remotePort = TextEditingController(text: '22');
+  String _mode = 'local';
   bool _busy = false;
   String? _error;
 
   Future<void> _open() async {
     final p = widget.profile;
-    setState(() { _busy = true; _error = null; });
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
       final jump = rust.JumpHost(
         host: p.jumpHost,
@@ -4106,18 +4242,117 @@ class _ForwardDialogState extends State<_ForwardDialog> {
       final lp = int.tryParse(_localPort.text.trim()) ?? 0;
       final rp = int.tryParse(_remotePort.text.trim()) ?? 22;
       if (p.authMethod == 'agent') {
-        await rust.openLocalForwardAgent(
-          host: p.host, port: p.port, username: p.username, jump: jump,
-          localAddr: _localAddr.text.trim(), localPort: lp,
-          remoteHost: _remoteHost.text.trim(), remotePort: rp,
-        );
+        if (_mode == 'socks') {
+          await rust.openSocksForwardAgent(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: lp,
+          );
+        } else if (_mode == 'remote') {
+          await rust.openRemoteForwardAgent(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            jump: jump,
+            remoteAddr: _localAddr.text.trim(),
+            remotePort: lp,
+            localHost: _remoteHost.text.trim(),
+            localPort: rp,
+          );
+        } else {
+          await rust.openLocalForwardAgent(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: lp,
+            remoteHost: _remoteHost.text.trim(),
+            remotePort: rp,
+          );
+        }
+      } else if (p.authMethod == 'password') {
+        final password = await _promptForwardPassword(p);
+        if (password == null) return;
+        if (_mode == 'socks') {
+          await rust.openSocksForwardPassword(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            password: password,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: lp,
+          );
+        } else if (_mode == 'remote') {
+          await rust.openRemoteForwardPassword(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            password: password,
+            jump: jump,
+            remoteAddr: _localAddr.text.trim(),
+            remotePort: lp,
+            localHost: _remoteHost.text.trim(),
+            localPort: rp,
+          );
+        } else {
+          await rust.openLocalForwardPassword(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            password: password,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: lp,
+            remoteHost: _remoteHost.text.trim(),
+            remotePort: rp,
+          );
+        }
+      } else if (p.authMethod == 'keyboard-interactive') {
+        await _openKeyboardInteractiveForward(p, jump, lp, rp);
       } else {
-        await rust.openLocalForwardPubkey(
-          host: p.host, port: p.port, username: p.username,
-          privateKeyPath: p.privateKeyPath, passphrase: null, jump: jump,
-          localAddr: _localAddr.text.trim(), localPort: lp,
-          remoteHost: _remoteHost.text.trim(), remotePort: rp,
-        );
+        if (_mode == 'socks') {
+          await rust.openSocksForwardPubkey(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            privateKeyPath: p.privateKeyPath,
+            passphrase: null,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: lp,
+          );
+        } else if (_mode == 'remote') {
+          await rust.openRemoteForwardPubkey(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            privateKeyPath: p.privateKeyPath,
+            passphrase: null,
+            jump: jump,
+            remoteAddr: _localAddr.text.trim(),
+            remotePort: lp,
+            localHost: _remoteHost.text.trim(),
+            localPort: rp,
+          );
+        } else {
+          await rust.openLocalForwardPubkey(
+            host: p.host,
+            port: p.port,
+            username: p.username,
+            privateKeyPath: p.privateKeyPath,
+            passphrase: null,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: lp,
+            remoteHost: _remoteHost.text.trim(),
+            remotePort: rp,
+          );
+        }
       }
       if (mounted) {
         widget.onCreated();
@@ -4130,11 +4365,150 @@ class _ForwardDialogState extends State<_ForwardDialog> {
     }
   }
 
+  Future<String?> _promptForwardPassword(rust.Profile profile) async {
+    final l10n = AppLocalizations.of(context);
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(l10n.passwordFor(profile.name)),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            obscureText: true,
+            decoration: InputDecoration(labelText: l10n.password),
+            onSubmitted: (_) => Navigator.pop(context, controller.text),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: Text(l10n.connect),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _openKeyboardInteractiveForward(
+    rust.Profile profile,
+    rust.JumpHost jump,
+    int listenPort,
+    int targetPort,
+  ) async {
+    final responses = <String>[];
+    final passwordRequired = AppLocalizations.of(context).passwordRequired;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      try {
+        if (_mode == 'socks') {
+          await rust.openSocksForwardKeyboardInteractive(
+            host: profile.host,
+            port: profile.port,
+            username: profile.username,
+            responses: responses,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: listenPort,
+          );
+        } else if (_mode == 'remote') {
+          await rust.openRemoteForwardKeyboardInteractive(
+            host: profile.host,
+            port: profile.port,
+            username: profile.username,
+            responses: responses,
+            jump: jump,
+            remoteAddr: _localAddr.text.trim(),
+            remotePort: listenPort,
+            localHost: _remoteHost.text.trim(),
+            localPort: targetPort,
+          );
+        } else {
+          await rust.openLocalForwardKeyboardInteractive(
+            host: profile.host,
+            port: profile.port,
+            username: profile.username,
+            responses: responses,
+            jump: jump,
+            localAddr: _localAddr.text.trim(),
+            localPort: listenPort,
+            remoteHost: _remoteHost.text.trim(),
+            remotePort: targetPort,
+          );
+        }
+        return;
+      } catch (e) {
+        final prompt = _keyboardInteractivePromptFromError(e.toString());
+        if (prompt == null) rethrow;
+        final answer = await _promptForwardKeyboardInteractive(profile, prompt);
+        if (answer == null) throw passwordRequired;
+        responses.add(answer);
+      }
+    }
+    throw 'Too many keyboard-interactive prompts.';
+  }
+
+  String? _keyboardInteractivePromptFromError(String error) {
+    const marker = 'keyboard-interactive prompt has no configured response: ';
+    final idx = error.indexOf(marker);
+    if (idx < 0) return null;
+    return error.substring(idx + marker.length).trim();
+  }
+
+  Future<String?> _promptForwardKeyboardInteractive(
+    rust.Profile profile,
+    String prompt,
+  ) async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(AppLocalizations.of(context).keyboardInteractive),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            obscureText:
+                prompt.toLowerCase().contains('password') ||
+                prompt.toLowerCase().contains('passcode') ||
+                prompt.toLowerCase().contains('otp'),
+            decoration: InputDecoration(
+              labelText: prompt.isEmpty ? profile.name : prompt,
+            ),
+            onSubmitted: (_) => Navigator.pop(context, controller.text),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(AppLocalizations.of(context).cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: Text(AppLocalizations.of(context).connect),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Dialog(
       backgroundColor: _bg1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: _line2)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: _line2),
+      ),
       child: Container(
         width: 520,
         padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
@@ -4144,31 +4518,95 @@ class _ForwardDialogState extends State<_ForwardDialog> {
           children: [
             Row(
               children: [
-                Text('NEW FORWARD', style: _eyebrow()),
+                Text(l10n.newForward.toUpperCase(), style: _eyebrow()),
                 const Spacer(),
-                _IconBtn(icon: Icons.close, onTap: () => Navigator.pop(context)),
+                _IconBtn(
+                  icon: Icons.close,
+                  onTap: () => Navigator.pop(context),
+                ),
               ],
             ),
             const SizedBox(height: 6),
-            Text('Local forward', style: _display(size: 22, weight: FontWeight.w500, color: _ink0)),
+            Text(
+              _mode == 'socks'
+                  ? 'SOCKS5 dynamic forward'
+                  : (_mode == 'remote' ? 'Remote forward' : l10n.localForward),
+              style: _display(size: 22, weight: FontWeight.w500, color: _ink0),
+            ),
             const SizedBox(height: 4),
-            Text('A listener on your machine that tunnels through ${widget.profile.name}.',
-                style: _sans(size: 12.5, color: _ink2)),
+            Text(
+              l10n.localForwardDescription(widget.profile.name),
+              style: _sans(size: 12.5, color: _ink2),
+            ),
             const SizedBox(height: 14),
-            Row(children: [
-              Expanded(child: _fwdField('LOCAL ADDR', _localAddr, '127.0.0.1')),
-              const SizedBox(width: 8),
-              SizedBox(width: 100, child: _fwdField('PORT', _localPort, '0')),
-            ]),
+            _Seg<String>(
+              value: _mode,
+              options: const [
+                ('local', 'LOCAL'),
+                ('remote', 'REMOTE'),
+                ('socks', 'SOCKS5'),
+              ],
+              onChanged: (v) => setState(() => _mode = v),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _fwdField(
+                    l10n.localAddr.toUpperCase(),
+                    _localAddr,
+                    _mode == 'remote' ? '0.0.0.0' : '127.0.0.1',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 100,
+                  child: _fwdField(l10n.port.toUpperCase(), _localPort, '0'),
+                ),
+              ],
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Center(child: Icon(Icons.arrow_downward, size: 14, color: _acc)),
+              child: Center(
+                child: Icon(Icons.arrow_downward, size: 14, color: _acc),
+              ),
             ),
-            Row(children: [
-              Expanded(child: _fwdField('REMOTE HOST', _remoteHost, 'cache.svc')),
-              const SizedBox(width: 8),
-              SizedBox(width: 100, child: _fwdField('PORT', _remotePort, '6379')),
-            ]),
+            if (_mode != 'socks')
+              Row(
+                children: [
+                  Expanded(
+                    child: _fwdField(
+                      _mode == 'remote'
+                          ? 'LOCAL TARGET'
+                          : l10n.remoteHost.toUpperCase(),
+                      _remoteHost,
+                      _mode == 'remote' ? '127.0.0.1' : 'cache.svc',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 100,
+                    child: _fwdField(
+                      l10n.port.toUpperCase(),
+                      _remotePort,
+                      '6379',
+                    ),
+                  ),
+                ],
+              )
+            else
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _bg2,
+                  border: Border.all(color: _line2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'SOCKS5 clients choose the remote host and port dynamically.',
+                  style: _sans(size: 12.5, color: _ink2),
+                ),
+              ),
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(_error!, style: _mono(size: 11.5, color: _Pal.cRose)),
@@ -4177,9 +4615,17 @@ class _ForwardDialogState extends State<_ForwardDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                _GhostButton(icon: Icons.close, label: 'CANCEL', onTap: () => Navigator.pop(context)),
+                _GhostButton(
+                  icon: Icons.close,
+                  label: l10n.cancel.toUpperCase(),
+                  onTap: () => Navigator.pop(context),
+                ),
                 const SizedBox(width: 8),
-                _PrimaryButton(icon: Icons.bolt, label: 'OPEN', onTap: _busy ? null : _open),
+                _PrimaryButton(
+                  icon: Icons.bolt,
+                  label: l10n.open.toUpperCase(),
+                  onTap: _busy ? null : _open,
+                ),
               ],
             ),
           ],
@@ -4196,7 +4642,10 @@ class _ForwardDialogState extends State<_ForwardDialog> {
         children: [
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 4),
-            child: Text(label, style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.3)),
+            child: Text(
+              label,
+              style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.3),
+            ),
           ),
           TextField(
             controller: c,
@@ -4233,8 +4682,9 @@ class _KeysViewState extends State<_KeysView> {
   }
 
   String _fmt(BigInt ms) {
+    final l10n = AppLocalizations.of(context);
     final n = ms.toInt();
-    if (n <= 0) return '—';
+    if (n <= 0) return l10n.unknown;
     final dt = DateTime.fromMillisecondsSinceEpoch(n).toLocal();
     return dt.toString().substring(0, 16);
   }
@@ -4248,7 +4698,10 @@ class _KeysViewState extends State<_KeysView> {
           title: Text(l10n.removeTrustedHostKeyQuestion),
           content: Text(l10n.removeTrustedHostKeyContent(k.host, k.port)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l10n.cancel)),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l10n.cancel),
+            ),
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: _Pal.cRose),
               onPressed: () => Navigator.pop(ctx, true),
@@ -4265,17 +4718,22 @@ class _KeysViewState extends State<_KeysView> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ViewHead(
-            eyebrow: 'trust · host keys',
-            title: 'Trusted host keys',
-            lede: 'Trust-on-first-use. Tindra remembers the first key seen for each host and refuses connections when the key changes.',
+            eyebrow: l10n.trustHostKeysEyebrow,
+            title: l10n.trustedHostKeys,
+            lede: l10n.trustedHostKeysDescription,
             actions: [
-              _GhostButton(icon: Icons.refresh, label: 'Refresh', onTap: _reload),
+              _GhostButton(
+                icon: Icons.refresh,
+                label: l10n.refresh,
+                onTap: _reload,
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -4285,7 +4743,16 @@ class _KeysViewState extends State<_KeysView> {
               if (snap.connectionState != ConnectionState.done) {
                 return Padding(
                   padding: const EdgeInsets.all(40),
-                  child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 1.6, color: _acc))),
+                  child: Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.6,
+                        color: _acc,
+                      ),
+                    ),
+                  ),
                 );
               }
               if (snap.hasError) {
@@ -4306,9 +4773,19 @@ class _KeysViewState extends State<_KeysView> {
                     children: [
                       Icon(Icons.vpn_key_outlined, size: 26, color: _ink3),
                       const SizedBox(height: 10),
-                      Text('No trusted keys yet', style: _display(size: 22, color: _ink0, weight: FontWeight.w500)),
+                      Text(
+                        l10n.noTrustedKeysYet,
+                        style: _display(
+                          size: 22,
+                          color: _ink0,
+                          weight: FontWeight.w500,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text('Connect to a host once and Tindra will remember it.', style: _sans(size: 12.5, color: _ink2)),
+                      Text(
+                        l10n.connectOnceRememberHost,
+                        style: _sans(size: 12.5, color: _ink2),
+                      ),
                     ],
                   ),
                 );
@@ -4322,7 +4799,8 @@ class _KeysViewState extends State<_KeysView> {
                 clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
-                    for (var i = 0; i < keys.length; i++) _keyRow(keys[i], i == keys.length - 1, _fmt),
+                    for (var i = 0; i < keys.length; i++)
+                      _keyRow(keys[i], i == keys.length - 1, _fmt),
                   ],
                 ),
               );
@@ -4334,24 +4812,48 @@ class _KeysViewState extends State<_KeysView> {
   }
 
   Widget _keyRow(rust.HostKey k, bool last, String Function(BigInt) fmt) {
+    final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: last ? Colors.transparent : _line))),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: last ? Colors.transparent : _line),
+        ),
+      ),
       child: Row(
         children: [
-          Container(width: 6, height: 18, decoration: BoxDecoration(color: _Pal.cEmerald, borderRadius: BorderRadius.circular(1))),
+          Container(
+            width: 6,
+            height: 18,
+            decoration: BoxDecoration(
+              color: _Pal.cEmerald,
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
           const SizedBox(width: 12),
           Expanded(
             flex: 4,
-            child: Text('${k.host}:${k.port}', style: _mono(size: 12.5, color: _ink0)),
+            child: Text(
+              '${k.host}:${k.port}',
+              style: _mono(size: 12.5, color: _ink0),
+            ),
           ),
           Expanded(
             flex: 6,
             child: Row(
               children: [
-                Text('SSH-ED25519', style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.0)),
+                Text(
+                  'SSH-ED25519',
+                  style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.0),
+                ),
                 const SizedBox(width: 10),
-                Flexible(child: Text(k.fingerprint, style: _mono(size: 11.5, color: _ink1), overflow: TextOverflow.ellipsis)),
+                Flexible(
+                  child: Text(
+                    k.fingerprint,
+                    style: _mono(size: 11.5, color: _ink1),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
@@ -4359,27 +4861,38 @@ class _KeysViewState extends State<_KeysView> {
             flex: 4,
             child: Row(
               children: [
-                Text('first ${fmt(k.firstSeenUnixMs)}', style: _mono(size: 10.5, color: _ink3)),
+                Text(
+                  '${l10n.first.toLowerCase()} ${fmt(k.firstSeenUnixMs)}',
+                  style: _mono(size: 10.5, color: _ink3),
+                ),
                 const SizedBox(width: 10),
-                Text('last ${fmt(k.lastSeenUnixMs)}', style: _mono(size: 10.5, color: _ink3)),
+                Text(
+                  '${l10n.last.toLowerCase()} ${fmt(k.lastSeenUnixMs)}',
+                  style: _mono(size: 10.5, color: _ink3),
+                ),
               ],
             ),
           ),
-          _IconBtn(icon: Icons.delete_outline, iconSize: 14, danger: true, onTap: () => _delete(k)),
+          _IconBtn(
+            icon: Icons.delete_outline,
+            iconSize: 14,
+            danger: true,
+            onTap: () => _delete(k),
+          ),
         ],
       ),
     );
   }
 
   Widget _errBox(String e) => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: _isLight ? const Color(0xFFFCEDE9) : const Color(0xFF2A1417),
-          border: Border.all(color: _Pal.cRose),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(e, style: _mono(size: 12, color: _Pal.cRose)),
-      );
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: _isLight ? const Color(0xFFFCEDE9) : const Color(0xFF2A1417),
+      border: Border.all(color: _Pal.cRose),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Text(e, style: _mono(size: 12, color: _Pal.cRose)),
+  );
 }
 
 // ============================================================================
@@ -4401,6 +4914,14 @@ class _SettingsViewState extends State<_SettingsView> {
   late double _size;
   late String _quake;
   late String _locale;
+  late String _localShell;
+  late String _localShellCwd;
+  late String _localShellEnv;
+  late _TerminalCursorStyle _cursorStyle;
+  late bool _copyOnSelect;
+  late int _scrollbackLimit;
+  late bool _warnOnLargePaste;
+  late Map<String, String> _shortcutBindings;
 
   @override
   void initState() {
@@ -4413,18 +4934,91 @@ class _SettingsViewState extends State<_SettingsView> {
     _size = s.fontSize > 0 ? s.fontSize : 13.0;
     _quake = s.quakeHotkey;
     _locale = s.locale.isEmpty ? 'system' : s.locale;
+    _localShell = s.localShell;
+    _localShellCwd = s.localShellCwd;
+    _localShellEnv = s.localShellEnv;
+    final terminal = terminalPrefs.value;
+    _cursorStyle = terminal.cursorStyle;
+    _copyOnSelect = terminal.copyOnSelect;
+    _scrollbackLimit = terminal.scrollbackLimit;
+    _warnOnLargePaste = terminal.warnOnLargePaste;
+    _shortcutBindings = {...shortcutPrefs.value.bindings};
   }
 
   Future<void> _commit() async {
     appAccent.value = _accent;
     appDense.value = _dense;
-    await widget.onSave(rust.Settings(
-      theme: _theme,
-      fontFamily: _font.trim().isEmpty ? 'JetBrains Mono' : _font.trim(),
-      fontSize: _size,
-      quakeHotkey: _quake.trim(),
-      locale: _locale,
-    ));
+    terminalPrefs.value = _TerminalPrefs(
+      cursorStyle: _cursorStyle,
+      copyOnSelect: _copyOnSelect,
+      scrollbackLimit: _scrollbackLimit,
+      warnOnLargePaste: _warnOnLargePaste,
+    );
+    shortcutPrefs.value = _ShortcutPrefs(bindings: {..._shortcutBindings});
+    await widget.onSave(
+      rust.Settings(
+        theme: _theme,
+        fontFamily: _font.trim().isEmpty ? 'JetBrains Mono' : _font.trim(),
+        fontSize: _size,
+        quakeHotkey: _quake.trim(),
+        locale: _locale,
+        localShell: _localShell.trim(),
+        localShellCwd: _localShellCwd.trim(),
+        localShellEnv: _localShellEnv.trim(),
+      ),
+    );
+  }
+
+  Future<void> _exportThemeToClipboard() async {
+    final payload = jsonEncode({
+      'theme': _theme,
+      'accent': _accent,
+      'dense': _dense,
+      'fontFamily': _font,
+      'fontSize': _size,
+      'cursorStyle': _cursorStyle.name,
+      'copyOnSelect': _copyOnSelect,
+      'scrollbackLimit': _scrollbackLimit,
+      'warnOnLargePaste': _warnOnLargePaste,
+      'shortcuts': _shortcutBindings,
+    });
+    await Clipboard.setData(ClipboardData(text: payload));
+  }
+
+  Future<void> _importThemeFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.trim().isEmpty) return;
+    final decoded = jsonDecode(text) as Map<String, dynamic>;
+    setState(() {
+      _theme = decoded['theme'] as String? ?? _theme;
+      _accent = decoded['accent'] as String? ?? _accent;
+      _dense = decoded['dense'] as bool? ?? _dense;
+      _font = decoded['fontFamily'] as String? ?? _font;
+      _size = (decoded['fontSize'] as num?)?.toDouble() ?? _size;
+      _cursorStyle = _TerminalCursorStyle.values.firstWhere(
+        (style) => style.name == decoded['cursorStyle'],
+        orElse: () => _cursorStyle,
+      );
+      _copyOnSelect = decoded['copyOnSelect'] as bool? ?? _copyOnSelect;
+      _scrollbackLimit =
+          (decoded['scrollbackLimit'] as int? ?? _scrollbackLimit).clamp(
+            100,
+            10000,
+          );
+      _warnOnLargePaste =
+          decoded['warnOnLargePaste'] as bool? ?? _warnOnLargePaste;
+      final decodedShortcuts = decoded['shortcuts'];
+      if (decodedShortcuts is Map<String, dynamic>) {
+        _shortcutBindings = {
+          ..._shortcutBindings,
+          for (final entry in decodedShortcuts.entries)
+            if (entry.value is String) entry.key: entry.value as String,
+        };
+      }
+    });
+    appAccent.value = _accent;
+    appDense.value = _dense;
   }
 
   @override
@@ -4436,63 +5030,91 @@ class _SettingsViewState extends State<_SettingsView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ViewHead(
-            eyebrow: 'preferences',
-            title: 'Settings',
-            lede: 'Theme, accent and density apply immediately. Other changes save when you click Apply.',
+            eyebrow: l10n.preferences,
+            title: l10n.settings,
+            lede: l10n.settingsLede,
             actions: [
-              _PrimaryButton(icon: Icons.check, label: 'APPLY', onTap: _commit),
+              _PrimaryButton(
+                icon: Icons.check,
+                label: l10n.apply.toUpperCase(),
+                onTap: _commit,
+              ),
             ],
           ),
           const SizedBox(height: 24),
-          LayoutBuilder(builder: (context, c) {
-            final cols = c.maxWidth > 1100 ? 3 : 1;
-            final groups = [
-              _appearanceGroup(),
-              _terminalGroup(),
-              _syncGroup(l10n),
-            ];
-            return Wrap(
-              spacing: 16, runSpacing: 16,
-              children: [
-                for (final g in groups)
-                  SizedBox(
-                    width: cols == 1 ? c.maxWidth : (c.maxWidth - (cols - 1) * 16) / cols,
-                    child: g,
-                  ),
-              ],
-            );
-          }),
+          LayoutBuilder(
+            builder: (context, c) {
+              final cols = c.maxWidth > 1100 ? 3 : 1;
+              final groups = [
+                _appearanceGroup(),
+                _terminalGroup(),
+                _keybindingGroup(),
+                _localShellGroup(l10n),
+                _syncGroup(l10n),
+                _diagnosticsGroup(l10n),
+              ];
+              return Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [
+                  for (final g in groups)
+                    SizedBox(
+                      width: cols == 1
+                          ? c.maxWidth
+                          : (c.maxWidth - (cols - 1) * 16) / cols,
+                      child: g,
+                    ),
+                ],
+              );
+            },
+          ),
         ],
       ),
     );
   }
 
   Widget _appearanceGroup() {
+    final l10n = AppLocalizations.of(context);
     return _SGroup(
-      title: 'Appearance',
+      title: l10n.appearance,
       children: [
         _SRow(
-          label: 'Theme',
-          hint: 'OLED-friendly dark, paper light, or stay on the system default',
+          label: l10n.theme,
+          hint: l10n.appearanceThemeHint,
           child: _Seg<String>(
             value: _theme,
-            options: const [('dark', 'DARK'), ('light', 'LIGHT')],
+            options: [
+              ('dark', l10n.dark.toUpperCase()),
+              ('light', l10n.light.toUpperCase()),
+            ],
             onChanged: (v) {
               setState(() => _theme = v);
               appSettings.value = rust.Settings(
-                theme: v, fontFamily: _font, fontSize: _size,
-                quakeHotkey: _quake, locale: _locale,
+                theme: v,
+                fontFamily: _font,
+                fontSize: _size,
+                quakeHotkey: _quake,
+                locale: _locale,
+                localShell: _localShell,
+                localShellCwd: _localShellCwd,
+                localShellEnv: _localShellEnv,
               );
             },
           ),
         ),
         _SRow(
-          label: 'Accent',
-          hint: 'Used for live indicators, focus, and highlights',
+          label: l10n.accent,
+          hint: l10n.accentHint,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              for (final a in const ['rose', 'amber', 'emerald', 'sky', 'violet'])
+              for (final a in const [
+                'rose',
+                'amber',
+                'emerald',
+                'sky',
+                'violet',
+              ])
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: _Swatch(
@@ -4508,15 +5130,38 @@ class _SettingsViewState extends State<_SettingsView> {
           ),
         ),
         _SRow(
-          label: 'Density',
-          hint: 'Tighter rows fit more on a smaller screen',
+          label: l10n.density,
+          hint: l10n.densityHint,
           child: _Seg<bool>(
             value: _dense,
-            options: const [(false, 'COZY'), (true, 'COMPACT')],
+            options: [
+              (false, l10n.cozy.toUpperCase()),
+              (true, l10n.compact.toUpperCase()),
+            ],
             onChanged: (v) {
               setState(() => _dense = v);
               appDense.value = v;
             },
+          ),
+        ),
+        _SRow(
+          label: 'Theme preset',
+          hint: 'Copy or paste appearance JSON',
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _TinyButton(
+                icon: Icons.upload_outlined,
+                label: 'Export',
+                onTap: _exportThemeToClipboard,
+              ),
+              _TinyButton(
+                icon: Icons.download_outlined,
+                label: 'Import',
+                onTap: _importThemeFromClipboard,
+              ),
+            ],
           ),
         ),
       ],
@@ -4524,12 +5169,13 @@ class _SettingsViewState extends State<_SettingsView> {
   }
 
   Widget _terminalGroup() {
+    final l10n = AppLocalizations.of(context);
     return _SGroup(
-      title: 'Terminal',
+      title: l10n.terminal,
       children: [
         _SRow(
-          label: 'Font',
-          hint: 'JetBrains Mono is bundled. Falls back to Cascadia Mono / Consolas.',
+          label: l10n.font,
+          hint: l10n.fontHint,
           child: _Seg<String>(
             value: _font,
             options: const [
@@ -4541,7 +5187,7 @@ class _SettingsViewState extends State<_SettingsView> {
           ),
         ),
         _SRow(
-          label: 'Size',
+          label: l10n.size(_size.toStringAsFixed(0)),
           hint: '${_size.toStringAsFixed(0)} pt',
           child: SizedBox(
             width: 220,
@@ -4553,8 +5199,64 @@ class _SettingsViewState extends State<_SettingsView> {
                 overlayColor: _acc.withValues(alpha: 0.12),
               ),
               child: Slider(
-                value: _size, min: 9, max: 24, divisions: 15,
+                value: _size,
+                min: 9,
+                max: 24,
+                divisions: 15,
                 onChanged: (v) => setState(() => _size = v),
+              ),
+            ),
+          ),
+        ),
+        _SRow(
+          label: 'Cursor',
+          hint: 'Terminal cursor shape',
+          child: _Seg<_TerminalCursorStyle>(
+            value: _cursorStyle,
+            options: const [
+              (_TerminalCursorStyle.block, 'BLOCK'),
+              (_TerminalCursorStyle.bar, 'BAR'),
+              (_TerminalCursorStyle.underline, 'UNDER'),
+            ],
+            onChanged: (v) => setState(() => _cursorStyle = v),
+          ),
+        ),
+        _SRow(
+          label: 'Copy on select',
+          hint: 'Copy selected terminal text immediately',
+          child: _Seg<bool>(
+            value: _copyOnSelect,
+            options: const [(false, 'OFF'), (true, 'ON')],
+            onChanged: (v) => setState(() => _copyOnSelect = v),
+          ),
+        ),
+        _SRow(
+          label: 'Paste warning',
+          hint: 'Ask before multiline or large paste',
+          child: _Seg<bool>(
+            value: _warnOnLargePaste,
+            options: const [(true, 'ON'), (false, 'OFF')],
+            onChanged: (v) => setState(() => _warnOnLargePaste = v),
+          ),
+        ),
+        _SRow(
+          label: 'Scrollback ${_scrollbackLimit.toString()}',
+          hint: 'Rows kept behind the current screen',
+          child: SizedBox(
+            width: 220,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: _acc,
+                inactiveTrackColor: _line2,
+                thumbColor: _acc,
+                overlayColor: _acc.withValues(alpha: 0.12),
+              ),
+              child: Slider(
+                value: _scrollbackLimit.toDouble(),
+                min: 100,
+                max: 10000,
+                divisions: 99,
+                onChanged: (v) => setState(() => _scrollbackLimit = v.round()),
               ),
             ),
           ),
@@ -4563,13 +5265,84 @@ class _SettingsViewState extends State<_SettingsView> {
     );
   }
 
-  Widget _syncGroup(AppLocalizations l10n) {
+  Widget _localShellGroup(AppLocalizations l10n) {
     return _SGroup(
-      title: 'Sync · system',
+      title: l10n.localShell,
       children: [
         _SRow(
-          label: 'Quake hotkey',
-          hint: 'Global key to summon Tindra over any window',
+          label: l10n.localShellCommand,
+          hint: l10n.localShellCommandHint,
+          child: TextField(
+            controller: TextEditingController(text: _localShell),
+            onChanged: (v) => _localShell = v,
+            decoration: const InputDecoration(
+              hintText: 'powershell.exe',
+              isDense: true,
+            ),
+            style: _mono(size: 12.5, color: _ink0),
+          ),
+        ),
+        _SRow(
+          label: l10n.localShellWorkingDirectory,
+          hint: l10n.localShellWorkingDirectoryHint,
+          child: TextField(
+            controller: TextEditingController(text: _localShellCwd),
+            onChanged: (v) => _localShellCwd = v,
+            decoration: const InputDecoration(
+              hintText: r'C:\Users\XIU',
+              isDense: true,
+            ),
+            style: _mono(size: 12.5, color: _ink0),
+          ),
+        ),
+        _SRow(
+          label: l10n.localShellEnvironment,
+          hint: l10n.localShellEnvironmentHint,
+          child: TextField(
+            controller: TextEditingController(text: _localShellEnv),
+            onChanged: (v) => _localShellEnv = v,
+            minLines: 3,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              hintText: 'NAME=value',
+              isDense: true,
+            ),
+            style: _mono(size: 12.5, color: _ink0),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _keybindingGroup() {
+    return _SGroup(
+      title: 'Keyboard shortcuts',
+      children: [
+        for (final action in _defaultShortcutBindings.keys)
+          _SRow(
+            label: _shortcutLabels[action] ?? action,
+            child: _ShortcutCapture(
+              value:
+                  _shortcutBindings[action] ??
+                  _defaultShortcutBindings[action]!,
+              onChanged: (v) => setState(() => _shortcutBindings[action] = v),
+              onReset: () => setState(
+                () => _shortcutBindings[action] =
+                    _defaultShortcutBindings[action]!,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _syncGroup(AppLocalizations l10n) {
+    return _SGroup(
+      title: l10n.syncSystem,
+      children: [
+        _SRow(
+          label: l10n.quakeHotkey,
+          hint: l10n.quakeHotkeyDescription,
           child: SizedBox(
             width: 180,
             child: TextField(
@@ -4581,20 +5354,210 @@ class _SettingsViewState extends State<_SettingsView> {
           ),
         ),
         _SRow(
-          label: 'Language',
+          label: l10n.language,
           hint: l10n.language,
           child: _Seg<String>(
             value: _locale,
-            options: const [
-              ('system', 'SYSTEM'),
-              ('en', 'EN'),
-              ('ko', 'KO'),
+            options: [
+              ('system', l10n.systemLanguage.toUpperCase()),
+              ('en', l10n.english.toUpperCase()),
+              ('ko', l10n.korean.toUpperCase()),
             ],
             onChanged: (v) => setState(() => _locale = v),
           ),
         ),
       ],
     );
+  }
+
+  Widget _diagnosticsGroup(AppLocalizations l10n) {
+    return _SGroup(
+      title: l10n.diagnostics,
+      children: [
+        _DiagnosticRow(label: l10n.appVersion, value: '1.0.0+1'),
+        _DiagnosticRow(label: l10n.rustCoreVersion, value: rust.coreVersion()),
+        _DiagnosticRow(label: 'Secret backend', future: rust.secretBackend()),
+        _DiagnosticRow(label: l10n.profilesPath, future: rust.profilesPath()),
+        _DiagnosticRow(label: l10n.settingsPath, future: rust.settingsPath()),
+        _DiagnosticRow(
+          label: l10n.expectedLogDirectory,
+          future: rust.expectedLogDir(),
+        ),
+      ],
+    );
+  }
+}
+
+class _DiagnosticRow extends StatelessWidget {
+  const _DiagnosticRow({required this.label, this.value, this.future});
+
+  final String label;
+  final String? value;
+  final Future<String>? future;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget valueWidget(String text) =>
+        SelectableText(text, style: _mono(size: 11, color: _ink1));
+    return _SRow(
+      label: label,
+      child: future == null
+          ? valueWidget(value ?? '')
+          : FutureBuilder<String>(
+              future: future,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return valueWidget(snapshot.error.toString());
+                }
+                return valueWidget(
+                  snapshot.data ?? AppLocalizations.of(context).loading,
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _ShortcutCapture extends StatefulWidget {
+  const _ShortcutCapture({
+    required this.value,
+    required this.onChanged,
+    required this.onReset,
+  });
+
+  final String value;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onReset;
+
+  @override
+  State<_ShortcutCapture> createState() => _ShortcutCaptureState();
+}
+
+class _ShortcutCaptureState extends State<_ShortcutCapture> {
+  final _focus = FocusNode(debugLabel: 'shortcut-capture');
+  bool _recording = false;
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _recording ? 'Press keys' : widget.value;
+    return KeyboardListener(
+      focusNode: _focus,
+      onKeyEvent: _recording ? _onKey : null,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              setState(() => _recording = true);
+              _focus.requestFocus();
+            },
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 132),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _recording ? _accSoft : _bg2,
+                border: Border.all(color: _recording ? _acc : _line),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                text,
+                style: _mono(
+                  size: 11.5,
+                  color: _recording ? _acc : _ink1,
+                  weight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          _TinyButton(
+            icon: Icons.backspace_outlined,
+            label: 'Clear',
+            onTap: () => widget.onChanged('None'),
+          ),
+          _TinyButton(
+            icon: Icons.restore_outlined,
+            label: 'Reset',
+            onTap: widget.onReset,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      setState(() => _recording = false);
+      return;
+    }
+    final label = _shortcutLabelForEvent(event);
+    if (label == null) return;
+    widget.onChanged(label);
+    setState(() => _recording = false);
+  }
+
+  String? _shortcutLabelForEvent(KeyEvent event) {
+    final keyName = _shortcutKeyName(event.logicalKey);
+    if (keyName == null) return null;
+    final parts = <String>[];
+    if (HardwareKeyboard.instance.isControlPressed) parts.add('Ctrl');
+    if (HardwareKeyboard.instance.isAltPressed) parts.add('Alt');
+    if (HardwareKeyboard.instance.isShiftPressed) parts.add('Shift');
+    if (HardwareKeyboard.instance.isMetaPressed) parts.add('Meta');
+    final modifierOnly = {
+      LogicalKeyboardKey.controlLeft,
+      LogicalKeyboardKey.controlRight,
+      LogicalKeyboardKey.altLeft,
+      LogicalKeyboardKey.altRight,
+      LogicalKeyboardKey.shiftLeft,
+      LogicalKeyboardKey.shiftRight,
+      LogicalKeyboardKey.metaLeft,
+      LogicalKeyboardKey.metaRight,
+    }.contains(event.logicalKey);
+    if (modifierOnly) return null;
+    parts.add(keyName);
+    return parts.join('+');
+  }
+
+  String? _shortcutKeyName(LogicalKeyboardKey key) {
+    if (key.keyLabel.length == 1) return key.keyLabel.toUpperCase();
+    if (key == LogicalKeyboardKey.tab) return 'Tab';
+    if (key == LogicalKeyboardKey.comma) return ',';
+    if (key == LogicalKeyboardKey.arrowLeft) return 'Left';
+    if (key == LogicalKeyboardKey.arrowRight) return 'Right';
+    if (key == LogicalKeyboardKey.arrowUp) return 'Up';
+    if (key == LogicalKeyboardKey.arrowDown) return 'Down';
+    if (key == LogicalKeyboardKey.pageUp) return 'PageUp';
+    if (key == LogicalKeyboardKey.pageDown) return 'PageDown';
+    if (key == LogicalKeyboardKey.home) return 'Home';
+    if (key == LogicalKeyboardKey.end) return 'End';
+    if (key == LogicalKeyboardKey.insert) return 'Insert';
+    if (key == LogicalKeyboardKey.delete) return 'Delete';
+    if (key == LogicalKeyboardKey.backspace) return 'Backspace';
+    return switch (key) {
+      LogicalKeyboardKey.f1 => 'F1',
+      LogicalKeyboardKey.f2 => 'F2',
+      LogicalKeyboardKey.f3 => 'F3',
+      LogicalKeyboardKey.f4 => 'F4',
+      LogicalKeyboardKey.f5 => 'F5',
+      LogicalKeyboardKey.f6 => 'F6',
+      LogicalKeyboardKey.f7 => 'F7',
+      LogicalKeyboardKey.f8 => 'F8',
+      LogicalKeyboardKey.f9 => 'F9',
+      LogicalKeyboardKey.f10 => 'F10',
+      LogicalKeyboardKey.f11 => 'F11',
+      LogicalKeyboardKey.f12 => 'F12',
+      _ => null,
+    };
   }
 }
 
@@ -4618,10 +5581,17 @@ class _SGroup extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 10),
             child: Container(
               padding: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: _line))),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: _line)),
+              ),
               child: Text(
                 title.toUpperCase(),
-                style: _mono(size: 11, color: _ink2, letterSpacing: 1.6, weight: FontWeight.w500),
+                style: _mono(
+                  size: 11,
+                  color: _ink2,
+                  letterSpacing: 1.6,
+                  weight: FontWeight.w500,
+                ),
               ),
             ),
           ),
@@ -4645,7 +5615,10 @@ class _SRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: _sans(size: 13.5, color: _ink0, weight: FontWeight.w500)),
+        Text(
+          label,
+          style: _sans(size: 13.5, color: _ink0, weight: FontWeight.w500),
+        ),
         if (hint != null) ...[
           const SizedBox(height: 2),
           Text(hint!, style: _sans(size: 12, color: _ink2)),
@@ -4658,7 +5631,11 @@ class _SRow extends StatelessWidget {
 }
 
 class _Seg<T> extends StatelessWidget {
-  const _Seg({required this.value, required this.options, required this.onChanged});
+  const _Seg({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
   final T value;
   final List<(T, String)> options;
   final ValueChanged<T> onChanged;
@@ -4679,16 +5656,32 @@ class _Seg<T> extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               onTap: () => onChanged(v),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 margin: const EdgeInsets.symmetric(horizontal: 1),
                 decoration: BoxDecoration(
                   color: v == value ? _bg0 : null,
                   borderRadius: BorderRadius.circular(4),
-                  boxShadow: v == value ? [BoxShadow(color: _line2, blurRadius: 0, spreadRadius: 1)] : null,
+                  boxShadow: v == value
+                      ? [
+                          BoxShadow(
+                            color: _line2,
+                            blurRadius: 0,
+                            spreadRadius: 1,
+                          ),
+                        ]
+                      : null,
                 ),
                 child: Text(
                   label,
-                  style: _mono(size: 11, color: v == value ? _ink0 : _ink2, letterSpacing: 0.5, weight: FontWeight.w500),
+                  style: _mono(
+                    size: 11,
+                    color: v == value ? _ink0 : _ink2,
+                    letterSpacing: 0.5,
+                    weight: FontWeight.w500,
+                  ),
                 ),
               ),
             ),
@@ -4699,7 +5692,11 @@ class _Seg<T> extends StatelessWidget {
 }
 
 class _Swatch extends StatelessWidget {
-  const _Swatch({required this.color, required this.selected, required this.onTap});
+  const _Swatch({
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
   final Color color;
   final bool selected;
   final VoidCallback onTap;
@@ -4709,287 +5706,16 @@ class _Swatch extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 26, height: 26,
+        width: 26,
+        height: 26,
         decoration: BoxDecoration(
           color: color,
           shape: BoxShape.circle,
-          border: Border.all(color: selected ? _ink0 : Colors.transparent, width: 2),
+          border: Border.all(
+            color: selected ? _ink0 : Colors.transparent,
+            width: 2,
+          ),
         ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Profile dialog (real implementation)
-// ============================================================================
-
-class _ProfileDialog extends StatefulWidget {
-  const _ProfileDialog({this.initial});
-  final rust.Profile? initial;
-  @override
-  State<_ProfileDialog> createState() => _ProfileDialogState();
-}
-
-class _ProfileDialogState extends State<_ProfileDialog> {
-  late final TextEditingController _name;
-  late final TextEditingController _host;
-  late final TextEditingController _port;
-  late final TextEditingController _user;
-  late final TextEditingController _key;
-  late final TextEditingController _notes;
-  late final TextEditingController _jumpHost;
-  late final TextEditingController _jumpPort;
-  late final TextEditingController _jumpUser;
-  late final TextEditingController _jumpKey;
-  late String _authMethod;
-  late bool _showJump;
-  late String _transport;
-
-  @override
-  void initState() {
-    super.initState();
-    final p = widget.initial;
-    _name = TextEditingController(text: p?.name ?? '');
-    _host = TextEditingController(text: p?.host ?? '');
-    _port = TextEditingController(text: (p?.port ?? 22).toString());
-    _user = TextEditingController(text: p?.username ?? '');
-    _key = TextEditingController(text: p?.privateKeyPath ?? r'C:\Users\XIU\.ssh\id_ed25519');
-    _notes = TextEditingController(text: p?.notes ?? '');
-    _jumpHost = TextEditingController(text: p?.jumpHost ?? '');
-    _jumpPort = TextEditingController(text: ((p?.jumpPort ?? 0) == 0 ? 22 : p!.jumpPort).toString());
-    _jumpUser = TextEditingController(text: p?.jumpUsername ?? '');
-    _jumpKey = TextEditingController(text: p?.jumpPrivateKeyPath ?? '');
-    _authMethod = (p?.authMethod.isEmpty ?? true) ? 'key' : p!.authMethod;
-    _showJump = (p?.jumpHost.isNotEmpty ?? false);
-    _transport = (p?.transport.isEmpty ?? true) ? 'ssh' : p!.transport;
-  }
-
-  @override
-  void dispose() {
-    for (final c in [_name, _host, _port, _user, _key, _notes, _jumpHost, _jumpPort, _jumpUser, _jumpKey]) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  void _save() {
-    final port = int.tryParse(_port.text.trim()) ?? 22;
-    final jumpPort = int.tryParse(_jumpPort.text.trim()) ?? 22;
-    final p = rust.Profile(
-      id: widget.initial?.id ?? '',
-      name: _name.text.trim().isEmpty
-          ? '${_user.text.trim()}@${_host.text.trim()}'
-          : _name.text.trim(),
-      host: _host.text.trim(),
-      port: port,
-      username: _user.text.trim(),
-      privateKeyPath: _key.text.trim(),
-      notes: _notes.text,
-      authMethod: _authMethod,
-      jumpHost: _showJump ? _jumpHost.text.trim() : '',
-      jumpPort: jumpPort,
-      jumpUsername: _showJump ? _jumpUser.text.trim() : '',
-      jumpPrivateKeyPath: _showJump ? _jumpKey.text.trim() : '',
-      transport: _transport,
-    );
-    Navigator.pop(context, p);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isNew = widget.initial == null;
-    final l10n = AppLocalizations.of(context);
-    return Dialog(
-      backgroundColor: _bg1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: _line2),
-      ),
-      child: Container(
-        width: 480,
-        padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Text(isNew ? 'NEW PROFILE' : 'EDIT PROFILE', style: _eyebrow()),
-                const Spacer(),
-                _IconBtn(icon: Icons.close, onTap: () => Navigator.pop(context)),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              isNew ? 'A new connection' : _name.text,
-              style: _display(size: 24, weight: FontWeight.w500, color: _ink0),
-            ),
-            const SizedBox(height: 14),
-            Flexible(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _row(l10n.name, _name, hint: 'edge-prod-01'),
-                    _row(l10n.host, _host, hint: 'localhost / 1.2.3.4 / dev.example.com'),
-                    Row(children: [
-                      Expanded(child: _row(l10n.user, _user, hint: 'XIU')),
-                      const SizedBox(width: 8),
-                      SizedBox(width: 100, child: _row(l10n.port, _port)),
-                    ]),
-                    _segLabel(l10n.transport),
-                    _segments(
-                      value: _transport,
-                      options: [
-                        ('ssh', l10n.ssh),
-                        ('telnet', l10n.telnetRawTcp),
-                      ],
-                      onChanged: (v) => setState(() => _transport = v),
-                    ),
-                    if (_transport == 'ssh') ...[
-                      _segLabel(l10n.auth),
-                      _segments(
-                        value: _authMethod,
-                        options: [
-                          ('key', l10n.privateKey),
-                          ('agent', l10n.sshAgent),
-                        ],
-                        onChanged: (v) => setState(() => _authMethod = v),
-                      ),
-                      if (_authMethod == 'key') _row(l10n.privateKeyPath, _key),
-                    ],
-                    _jumpSection(l10n),
-                    _row(l10n.notes, _notes, hint: l10n.optional, maxLines: 2),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                _GhostButton(icon: Icons.close, label: l10n.cancel.toUpperCase(), onTap: () => Navigator.pop(context)),
-                const SizedBox(width: 8),
-                _PrimaryButton(
-                  icon: isNew ? Icons.add : Icons.check,
-                  label: (isNew ? l10n.create : l10n.save).toUpperCase(),
-                  onTap: _host.text.trim().isEmpty || _user.text.trim().isEmpty ? null : _save,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _segLabel(String label) => Padding(
-        padding: const EdgeInsets.only(top: 12, bottom: 6, left: 4),
-        child: Text(label.toUpperCase(), style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.3)),
-      );
-
-  Widget _segments({
-    required String value,
-    required List<(String, String)> options,
-    required ValueChanged<String> onChanged,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: _bg2,
-        border: Border.all(color: _line),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        children: [
-          for (final (val, label) in options)
-            Expanded(
-              child: GestureDetector(
-                onTap: () => onChanged(val),
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 7),
-                  decoration: BoxDecoration(
-                    color: value == val ? _bg0 : null,
-                    borderRadius: BorderRadius.circular(4),
-                    boxShadow: value == val
-                        ? [BoxShadow(color: _line2, blurRadius: 0, spreadRadius: 1)]
-                        : null,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    label.toUpperCase(),
-                    style: _mono(
-                      size: 11,
-                      color: value == val ? _ink0 : _ink2,
-                      letterSpacing: 0.6,
-                      weight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _jumpSection(AppLocalizations l10n) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _segLabel(l10n.jumpHost),
-              const Spacer(),
-              Switch(
-                value: _showJump,
-                activeThumbColor: _isLight ? Colors.white : _Pal.dBg0,
-                activeTrackColor: _acc,
-                onChanged: (v) => setState(() => _showJump = v),
-              ),
-            ],
-          ),
-          if (_showJump) ...[
-            Row(children: [
-              Expanded(child: _row(l10n.host, _jumpHost, hint: 'jump.example.com')),
-              const SizedBox(width: 8),
-              SizedBox(width: 100, child: _row(l10n.port, _jumpPort)),
-            ]),
-            Row(children: [
-              Expanded(child: _row(l10n.user, _jumpUser, hint: 'XIU')),
-              const SizedBox(width: 8),
-              Expanded(child: _row(l10n.keyPath, _jumpKey)),
-            ]),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _row(String label, TextEditingController c, {String? hint, int maxLines = 1}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 4),
-            child: Text(label.toUpperCase(),
-                style: _mono(size: 10.5, color: _ink3, letterSpacing: 1.3)),
-          ),
-          TextField(
-            controller: c,
-            maxLines: maxLines,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(hintText: hint, isDense: true),
-            style: _mono(size: 12.5, color: _ink0),
-          ),
-        ],
       ),
     );
   }
