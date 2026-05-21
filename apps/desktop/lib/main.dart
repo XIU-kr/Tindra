@@ -831,6 +831,12 @@ bool shouldShowPrivateKeyFieldForAuthMethod(String authMethod) =>
     authMethod == 'key';
 
 @visibleForTesting
+bool shouldDiscardPendingConnectionTab({
+  required bool userCanceled,
+  required bool hasSessionId,
+}) => userCanceled && !hasSessionId;
+
+@visibleForTesting
 class HostKeyDecisionDetails extends StatelessWidget {
   const HostKeyDecisionDetails({
     super.key,
@@ -1105,8 +1111,9 @@ class _DetachedNativeShellState extends State<_DetachedNativeShell> {
 
   Widget _content() {
     if (_sessions.isEmpty) {
+      final l10n = AppLocalizations.of(context);
       return Center(
-        child: Text('No session', style: _mono(size: 13, color: _ink2)),
+        child: Text(l10n.noSession, style: _mono(size: 13, color: _ink2)),
       );
     }
     if (_sessions.length == 1) {
@@ -1603,10 +1610,9 @@ class _ShellScreenState extends State<ShellScreen> {
     _TabGroup? splitInto,
     Axis? axis,
   }) async {
-    final l10n = AppLocalizations.of(context);
-
     final tab = _SessionTab(profileId: p.id, profileName: p.name);
     final group = splitInto;
+    final previousActiveIdx = _activeIdx;
     setState(() {
       if (group != null) {
         if (axis != null) group.splitAxis = axis;
@@ -1626,9 +1632,10 @@ class _ShellScreenState extends State<ShellScreen> {
       if (p.transport != 'telnet') {
         final ok = await _ensureTrustedProfileHostKey(p);
         if (!ok) {
-          tab.error = l10n.hostKeyNotTrusted;
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
+          await _discardPendingConnectionTab(
+            tab,
+            fallbackActiveIdx: previousActiveIdx,
+          );
           return;
         }
       }
@@ -1659,9 +1666,10 @@ class _ShellScreenState extends State<ShellScreen> {
       } else if (p.authMethod == 'password') {
         final password = await _promptPassword(p);
         if (password == null) {
-          tab.error = l10n.passwordRequired;
-          tab.state = _ConnState.disconnected;
-          if (mounted) setState(() {});
+          await _discardPendingConnectionTab(
+            tab,
+            fallbackActiveIdx: previousActiveIdx,
+          );
           return;
         }
         id = await rust.openShellPassword(
@@ -1716,6 +1724,53 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
+  Future<void> _discardPendingConnectionTab(
+    _SessionTab tab, {
+    required int fallbackActiveIdx,
+  }) async {
+    if (!shouldDiscardPendingConnectionTab(
+      userCanceled: true,
+      hasSessionId: tab.sessionId != null,
+    )) {
+      return;
+    }
+    await tab.dispose();
+    if (!mounted) return;
+    setState(() {
+      for (var groupIndex = 0; groupIndex < _tabs.length; groupIndex++) {
+        final group = _tabs[groupIndex];
+        final sessionIndex = group.sessions.indexOf(tab);
+        if (sessionIndex < 0) continue;
+        if (group.sessions.length <= 1) {
+          _tabs.removeAt(groupIndex);
+          if (_tabs.isEmpty) {
+            _activeIdx = -1;
+          } else if (fallbackActiveIdx >= 0 &&
+              fallbackActiveIdx < _tabs.length) {
+            _activeIdx = fallbackActiveIdx;
+          } else if (groupIndex >= _tabs.length) {
+            _activeIdx = _tabs.length - 1;
+          } else {
+            _activeIdx = groupIndex;
+          }
+        } else {
+          group.sessions.removeAt(sessionIndex);
+          if (sessionIndex < group.splitWeights.length) {
+            group.splitWeights.removeAt(sessionIndex);
+          }
+          group.normalizeWeights();
+          if (group.activeIdx >= group.sessions.length) {
+            group.activeIdx = group.sessions.length - 1;
+          }
+          _activeIdx = _tabs.indexOf(group);
+        }
+        break;
+      }
+      _view = _View.sessions;
+    });
+    unawaited(_saveDesktopState());
+  }
+
   Future<void> _openQuickConnectDialog() async {
     final l10n = AppLocalizations.of(context);
     final controller = TextEditingController();
@@ -1755,7 +1810,7 @@ class _ShellScreenState extends State<ShellScreen> {
                           icon: isFavorite
                               ? Icons.star
                               : Icons.star_border_outlined,
-                          tooltip: 'Favorite',
+                          tooltip: l10n.favorite,
                           onTap: current.isEmpty
                               ? null
                               : () {
@@ -1783,7 +1838,7 @@ class _ShellScreenState extends State<ShellScreen> {
                     if (_quickConnectFavorites.isNotEmpty) ...[
                       const SizedBox(height: 14),
                       Text(
-                        'Favorites',
+                        l10n.favorites,
                         style: _mono(
                           size: 11,
                           color: _ink2,
@@ -1812,7 +1867,7 @@ class _ShellScreenState extends State<ShellScreen> {
                     if (_quickConnectHistory.isNotEmpty) ...[
                       const SizedBox(height: 14),
                       Text(
-                        'Recent',
+                        l10n.recent,
                         style: _mono(
                           size: 11,
                           color: _ink2,
@@ -1843,12 +1898,12 @@ class _ShellScreenState extends State<ShellScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Cancel'),
+                  child: Text(l10n.cancel),
                 ),
                 FilledButton(
                   onPressed: () =>
                       Navigator.pop(dialogContext, controller.text),
-                  child: const Text('Connect'),
+                  child: Text(l10n.connect),
                 ),
               ],
             );
@@ -2246,6 +2301,7 @@ class _ShellScreenState extends State<ShellScreen> {
   Future<void> _detachTabGroup(int idx) async {
     if (idx < 0 || idx >= _tabs.length) return;
     final group = _tabs[idx];
+    final l10n = AppLocalizations.of(context);
     final args = _NativeDetachedSessionArgs(
       profileName: group.profileName,
       splitAxis: group.splitAxis,
@@ -2258,10 +2314,13 @@ class _ShellScreenState extends State<ShellScreen> {
               profileName: session.displayName,
               cols: session.cols,
               rows: session.rows,
-            ),
+        ),
       ],
     );
-    if (args.sessions.isEmpty) return;
+    if (args.sessions.isEmpty) {
+      _showShellMessage(l10n.noDetachableSession);
+      return;
+    }
     final controller = await WindowController.create(
       WindowConfiguration(arguments: args.toJson(), hiddenAtLaunch: true),
     );
@@ -2323,6 +2382,7 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   void _reattachNativeSession(String raw) {
+    final l10n = AppLocalizations.of(context);
     final args = _NativeDetachedSessionArgs.fromJson(raw);
     final sessions = <_SessionTab>[];
     for (final info in args.sessions) {
@@ -2348,10 +2408,13 @@ class _ShellScreenState extends State<ShellScreen> {
               tab.state = _ConnState.disconnected;
               if (mounted) setState(() {});
             },
-          );
+      );
       sessions.add(tab);
     }
-    if (sessions.isEmpty) return;
+    if (sessions.isEmpty) {
+      _showShellMessage(l10n.noDetachableSession);
+      return;
+    }
     setState(() {
       final group = _TabGroup(
         profileName: args.profileName,
@@ -2368,6 +2431,13 @@ class _ShellScreenState extends State<ShellScreen> {
     });
     unawaited(_saveDesktopState());
     _termFocus.requestFocus();
+  }
+
+  void _showShellMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _closeActiveSession() async {

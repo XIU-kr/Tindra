@@ -64,6 +64,15 @@ class AppLocalizationsKo extends AppLocalizations {
   String get close => '닫기';
 
   @override
+  String get favorite => '즐겨찾기';
+
+  @override
+  String get favorites => '즐겨찾기';
+
+  @override
+  String get recent => '최근';
+
+  @override
   String get refresh => '새로고침';
 
   @override
@@ -156,6 +165,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get noOpenSessions => '열린 세션 없음';
+
+  @override
+  String get noSession => '세션 없음';
 
   @override
   String liveSessionsSummary(Object profiles, Object sessions) {
@@ -291,6 +303,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get open => '열기';
+
+  @override
+  String get openLink => '링크 열기';
 
   @override
   String get navigate => '이동';
@@ -695,6 +710,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get detachTab => '탭 분리';
+
+  @override
+  String get noDetachableSession => '분리할 연결된 세션이 없습니다.';
 
   @override
   String get pinOrUnpinTab => '탭 고정 또는 해제';

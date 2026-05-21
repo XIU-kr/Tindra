@@ -200,6 +200,24 @@ abstract class AppLocalizations {
   /// **'Close'**
   String get close;
 
+  /// No description provided for @favorite.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorite'**
+  String get favorite;
+
+  /// No description provided for @favorites.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites'**
+  String get favorites;
+
+  /// No description provided for @recent.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get recent;
+
   /// No description provided for @refresh.
   ///
   /// In en, this message translates to:
@@ -373,6 +391,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No open sessions'**
   String get noOpenSessions;
+
+  /// No description provided for @noSession.
+  ///
+  /// In en, this message translates to:
+  /// **'No session'**
+  String get noSession;
 
   /// No description provided for @liveSessionsSummary.
   ///
@@ -619,6 +643,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Open'**
   String get open;
+
+  /// No description provided for @openLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Open link'**
+  String get openLink;
 
   /// No description provided for @navigate.
   ///
@@ -1380,6 +1410,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Detach tab'**
   String get detachTab;
+
+  /// No description provided for @noDetachableSession.
+  ///
+  /// In en, this message translates to:
+  /// **'No connected session to detach.'**
+  String get noDetachableSession;
 
   /// No description provided for @pinOrUnpinTab.
   ///

@@ -64,6 +64,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get close => 'Close';
 
   @override
+  String get favorite => 'Favorite';
+
+  @override
+  String get favorites => 'Favorites';
+
+  @override
+  String get recent => 'Recent';
+
+  @override
   String get refresh => 'Refresh';
 
   @override
@@ -158,6 +167,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noOpenSessions => 'No open sessions';
+
+  @override
+  String get noSession => 'No session';
 
   @override
   String liveSessionsSummary(Object profiles, Object sessions) {
@@ -296,6 +308,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get open => 'Open';
+
+  @override
+  String get openLink => 'Open link';
 
   @override
   String get navigate => 'Navigate';
@@ -704,6 +719,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get detachTab => 'Detach tab';
+
+  @override
+  String get noDetachableSession => 'No connected session to detach.';
 
   @override
   String get pinOrUnpinTab => 'Pin or unpin tab';

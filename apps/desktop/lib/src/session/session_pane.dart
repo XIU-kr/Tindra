@@ -1645,14 +1645,14 @@ class _CellGrid extends StatelessWidget {
                       anchors: state.contextMenuAnchors,
                       buttonItems: [
                         ContextMenuButtonItem(
-                          label: 'Copy',
+                          label: l10n.copy,
                           onPressed: () {
                             state.hideToolbar();
                             unawaited(onCopy());
                           },
                         ),
                         ContextMenuButtonItem(
-                          label: 'Paste',
+                          label: l10n.paste,
                           onPressed: () {
                             state.hideToolbar();
                             unawaited(onPaste());
@@ -1660,7 +1660,7 @@ class _CellGrid extends StatelessWidget {
                         ),
                         if (firstUrl != null)
                           ContextMenuButtonItem(
-                            label: 'Open link',
+                            label: l10n.openLink,
                             onPressed: () {
                               state.hideToolbar();
                               unawaited(onOpenUrl(firstUrl));
@@ -1789,6 +1789,7 @@ class _CellGrid extends StatelessWidget {
     Offset position,
     String? firstUrl,
   ) async {
+    final l10n = AppLocalizations.of(context);
     final selected = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -1798,12 +1799,12 @@ class _CellGrid extends StatelessWidget {
         position.dy,
       ),
       items: [
-        const PopupMenuItem(value: 'copy', child: Text('Copy')),
-        const PopupMenuItem(value: 'paste', child: Text('Paste')),
+        PopupMenuItem(value: 'copy', child: Text(l10n.copy)),
+        PopupMenuItem(value: 'paste', child: Text(l10n.paste)),
         if (firstUrl != null)
-          const PopupMenuItem(value: 'open-url', child: Text('Open link')),
+          PopupMenuItem(value: 'open-url', child: Text(l10n.openLink)),
         const PopupMenuDivider(),
-        const PopupMenuItem(value: 'reconnect', child: Text('Reconnect')),
+        PopupMenuItem(value: 'reconnect', child: Text(l10n.reconnect)),
       ],
     );
     switch (selected) {
