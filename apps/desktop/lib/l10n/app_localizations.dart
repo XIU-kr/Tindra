@@ -530,6 +530,18 @@ abstract class AppLocalizations {
   /// **'The session is disconnected.'**
   String get sessionDisconnectedMessage;
 
+  /// No description provided for @connectionTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection timed out after 20 seconds.'**
+  String get connectionTimedOut;
+
+  /// No description provided for @cancelConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel connection'**
+  String get cancelConnection;
+
   /// No description provided for @waitingForFirstChunk.
   ///
   /// In en, this message translates to:

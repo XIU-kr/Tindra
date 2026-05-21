@@ -249,6 +249,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sessionDisconnectedMessage => 'The session is disconnected.';
 
   @override
+  String get connectionTimedOut => 'Connection timed out after 20 seconds.';
+
+  @override
+  String get cancelConnection => 'Cancel connection';
+
+  @override
   String get waitingForFirstChunk => 'Waiting for first terminal output';
 
   @override

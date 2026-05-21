@@ -61,6 +61,14 @@ void main() {
     );
   });
 
+  test('connection timeout errors are recognized for UI mapping', () {
+    expect(
+      isConnectionTimeoutError('connection timed out after 20 seconds'),
+      isTrue,
+    );
+    expect(isConnectionTimeoutError('permission denied'), isFalse);
+  });
+
   testWidgets('Korean localization covers quick connect shell strings', (
     tester,
   ) async {
@@ -85,5 +93,57 @@ void main() {
     expect(l10n.noSession, '세션 없음');
     expect(l10n.noDetachableSession, '분리할 연결된 세션이 없습니다.');
     expect(l10n.openLink, '링크 열기');
+    expect(l10n.connectionTimedOut, '연결 시간이 20초를 초과했습니다.');
+    expect(l10n.cancelConnection, '연결 취소');
+  });
+
+  testWidgets('shell error banner displays and can be dismissed', (
+    tester,
+  ) async {
+    var dismissed = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: ShellErrorBanner(
+            message: 'profile save failed',
+            onDismiss: () => dismissed = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('profile save failed'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.close));
+    expect(dismissed, isTrue);
+  });
+
+  testWidgets('profile connection choice row shows name and endpoint', (
+    tester,
+  ) async {
+    var tapped = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: ProfileConnectionChoiceRow(
+            name: 'oci-osaka-1',
+            endpoint: 'xiu@oci-osaka-1:22',
+            authMethod: 'key',
+            accent: Colors.lightBlueAccent,
+            onTap: () => tapped = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('oci-osaka-1'), findsOneWidget);
+    expect(find.text('xiu@oci-osaka-1:22'), findsOneWidget);
+    expect(find.text('key'), findsOneWidget);
+
+    await tester.tap(find.byType(ProfileConnectionChoiceRow));
+    expect(tapped, isTrue);
   });
 }

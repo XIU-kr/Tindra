@@ -545,6 +545,7 @@ class _SessionTab {
   DateTime lastActivityAt = DateTime.now();
   bool hasUnreadActivity = false;
   bool hasBellActivity = false;
+  bool connectionCanceled = false;
   String? selectedTerminalText;
 
   int cols = 120;
@@ -837,6 +838,10 @@ bool shouldDiscardPendingConnectionTab({
 }) => userCanceled && !hasSessionId;
 
 @visibleForTesting
+bool isConnectionTimeoutError(Object error) =>
+    error.toString().toLowerCase().contains('connection timed out');
+
+@visibleForTesting
 class HostKeyDecisionDetails extends StatelessWidget {
   const HostKeyDecisionDetails({
     super.key,
@@ -860,6 +865,151 @@ class HostKeyDecisionDetails extends StatelessWidget {
         ? l10n.hostKeyChangedContent(actual, expected, host, port)
         : l10n.trustHostKeyContent(actual, host, port);
     return SelectableText(text);
+  }
+}
+
+@visibleForTesting
+class ShellErrorBanner extends StatelessWidget {
+  const ShellErrorBanner({
+    super.key,
+    required this.message,
+    required this.onDismiss,
+  });
+
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(272, 48, 24, 0),
+        constraints: const BoxConstraints(maxWidth: 720),
+        decoration: BoxDecoration(
+          color: _Pal.cRose.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.24),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(14, 13, 8, 12),
+              child: Icon(Icons.error_outline, size: 18, color: Colors.white),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  message,
+                  style: _sans(
+                    size: 12.5,
+                    color: Colors.white,
+                    weight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            Tooltip(
+              message: l10n.close,
+              child: IconButton(
+                visualDensity: VisualDensity.compact,
+                iconSize: 16,
+                color: Colors.white,
+                onPressed: onDismiss,
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+@visibleForTesting
+class ProfileConnectionChoiceRow extends StatelessWidget {
+  const ProfileConnectionChoiceRow({
+    super.key,
+    required this.name,
+    required this.endpoint,
+    required this.authMethod,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String name;
+  final String endpoint;
+  final String authMethod;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: SizedBox(
+        height: 58,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              _BarMark(accent: accent),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _sans(
+                        size: 13.5,
+                        color: _ink0,
+                        weight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      endpoint,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _mono(size: 11.5, color: _ink2),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 92),
+                child: Text(
+                  authMethod,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: _mono(
+                    size: 10.5,
+                    color: _ink3,
+                    weight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1248,6 +1398,39 @@ class _ShellScreenState extends State<ShellScreen> {
 
   _SessionTab? get _activeTab => _activeGroup?.active;
 
+  void _setSidebarError(Object error) {
+    if (!mounted) return;
+    setState(() => _sidebarError = error.toString());
+  }
+
+  void _clearSidebarError() {
+    if (!mounted || _sidebarError == null) return;
+    setState(() => _sidebarError = null);
+  }
+
+  String _connectionErrorMessage(Object error) {
+    final l10n = AppLocalizations.of(context);
+    return isConnectionTimeoutError(error)
+        ? l10n.connectionTimedOut
+        : error.toString();
+  }
+
+  Future<bool> _closeLateCanceledConnection(
+    _SessionTab tab,
+    BigInt sessionId,
+  ) async {
+    if (!tab.connectionCanceled) return false;
+    final canceledMessage = AppLocalizations.of(context).cancelConnection;
+    try {
+      await rust.shellClose(sessionId: sessionId);
+    } catch (_) {}
+    tab.sessionId = null;
+    tab.state = _ConnState.disconnected;
+    tab.error = canceledMessage;
+    if (mounted) setState(() {});
+    return true;
+  }
+
   void _applyTerminalSnapshot(_SessionTab tab, rust.TerminalSnapshot snapshot) {
     tab.snapshot = snapshot;
     tab.lastActivityAt = DateTime.now();
@@ -1338,6 +1521,7 @@ class _ShellScreenState extends State<ShellScreen> {
       setState(() {
         _profiles = list;
         _profilesLoading = false;
+        _sidebarError = null;
         if (_selectedProfileId == null && list.isNotEmpty) {
           _selectedProfileId = list.first.id;
         }
@@ -1359,9 +1543,12 @@ class _ShellScreenState extends State<ShellScreen> {
     try {
       final saved = await rust.upsertProfile(profile: result);
       await _refreshProfiles();
-      setState(() => _selectedProfileId = saved.id);
+      setState(() {
+        _selectedProfileId = saved.id;
+        _sidebarError = null;
+      });
     } catch (e) {
-      setState(() => _sidebarError = e.toString());
+      _setSidebarError(e);
     }
   }
 
@@ -1395,9 +1582,10 @@ class _ShellScreenState extends State<ShellScreen> {
         if (_selectedProfileId == profile.id) {
           _selectedProfileId = _profiles.isEmpty ? null : _profiles.first.id;
         }
+        _sidebarError = null;
       });
     } catch (e) {
-      setState(() => _sidebarError = e.toString());
+      _setSidebarError(e);
     }
   }
 
@@ -1499,41 +1687,12 @@ class _ShellScreenState extends State<ShellScreen> {
                                         Divider(height: 1, color: _line),
                                     itemBuilder: (_, i) {
                                       final p = matches[i];
-                                      return ListTile(
-                                        dense: true,
-                                        minLeadingWidth: 18,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 4,
-                                            ),
-                                        leading: _BarMark(
-                                          accent: _accentForProfile(p),
-                                        ),
-                                        title: Text(
-                                          p.name,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: _sans(
-                                            size: 13.5,
-                                            color: _ink0,
-                                            weight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        subtitle: Text(
-                                          '${p.username}@${p.host}:${p.port}',
-                                          overflow: TextOverflow.ellipsis,
-                                          style: _mono(
-                                            size: 11.5,
-                                            color: _ink3,
-                                          ),
-                                        ),
-                                        trailing: Text(
-                                          p.authMethod,
-                                          style: _mono(
-                                            size: 10.5,
-                                            color: _ink3,
-                                          ),
-                                        ),
+                                      return ProfileConnectionChoiceRow(
+                                        name: p.name,
+                                        endpoint:
+                                            '${p.username}@${p.host}:${p.port}',
+                                        authMethod: p.authMethod,
+                                        accent: _accentForProfile(p),
                                         onTap: () =>
                                             Navigator.pop(dialogContext, p),
                                       );
@@ -1579,10 +1738,15 @@ class _ShellScreenState extends State<ShellScreen> {
     try {
       final saved = await rust.upsertProfile(profile: result);
       await _refreshProfiles();
-      if (mounted) setState(() => _selectedProfileId = saved.id);
+      if (mounted) {
+        setState(() {
+          _selectedProfileId = saved.id;
+          _sidebarError = null;
+        });
+      }
       return saved;
     } catch (e) {
-      if (mounted) setState(() => _sidebarError = e.toString());
+      _setSidebarError(e);
       return null;
     }
   }
@@ -1695,6 +1859,7 @@ class _ShellScreenState extends State<ShellScreen> {
           jump: jump,
         );
       }
+      if (await _closeLateCanceledConnection(tab, id)) return;
       tab.sessionId = id;
       tab.outputSub = rust
           .shellOutputStream(sessionId: id)
@@ -1704,7 +1869,7 @@ class _ShellScreenState extends State<ShellScreen> {
               if (mounted) setState(() {});
             },
             onError: (e) {
-              tab.error = e.toString();
+              tab.error = _connectionErrorMessage(e);
               tab.state = _ConnState.disconnected;
               if (mounted) setState(() {});
             },
@@ -1718,7 +1883,7 @@ class _ShellScreenState extends State<ShellScreen> {
       _passphrase.clear();
       _termFocus.requestFocus();
     } catch (e) {
-      tab.error = e.toString();
+      tab.error = _connectionErrorMessage(e);
       tab.state = _ConnState.disconnected;
       if (mounted) setState(() {});
     }
@@ -2055,6 +2220,7 @@ class _ShellScreenState extends State<ShellScreen> {
         cols: tab.cols,
         rows: tab.rows,
       );
+      if (await _closeLateCanceledConnection(tab, id)) return;
       tab.sessionId = id;
       tab.outputSub = rust
           .shellOutputStream(sessionId: id)
@@ -2064,7 +2230,7 @@ class _ShellScreenState extends State<ShellScreen> {
               if (mounted) setState(() {});
             },
             onError: (e) {
-              tab.error = e.toString();
+              tab.error = _connectionErrorMessage(e);
               tab.state = _ConnState.disconnected;
               if (mounted) setState(() {});
             },
@@ -2077,7 +2243,7 @@ class _ShellScreenState extends State<ShellScreen> {
       if (mounted) setState(() {});
       _termFocus.requestFocus();
     } catch (e) {
-      tab.error = e.toString();
+      tab.error = _connectionErrorMessage(e);
       tab.state = _ConnState.disconnected;
       if (mounted) setState(() {});
     }
@@ -2172,6 +2338,7 @@ class _ShellScreenState extends State<ShellScreen> {
           jump: jump,
         );
       }
+      if (await _closeLateCanceledConnection(tab, id)) return;
       tab.sessionId = id;
       tab.outputSub = rust
           .shellOutputStream(sessionId: id)
@@ -2181,7 +2348,7 @@ class _ShellScreenState extends State<ShellScreen> {
               if (mounted) setState(() {});
             },
             onError: (e) {
-              tab.error = e.toString();
+              tab.error = _connectionErrorMessage(e);
               tab.state = _ConnState.disconnected;
               if (mounted) setState(() {});
             },
@@ -2195,7 +2362,7 @@ class _ShellScreenState extends State<ShellScreen> {
       _passphrase.clear();
       _termFocus.requestFocus();
     } catch (e) {
-      tab.error = e.toString();
+      tab.error = _connectionErrorMessage(e);
       tab.state = _ConnState.disconnected;
       if (mounted) setState(() {});
     }
@@ -2465,6 +2632,10 @@ class _ShellScreenState extends State<ShellScreen> {
     final tab = _activeTab;
     if (tab == null) return;
     final id = tab.sessionId;
+    if (id == null && tab.state == _ConnState.connecting) {
+      tab.connectionCanceled = true;
+      tab.error = AppLocalizations.of(context).cancelConnection;
+    }
     if (id != null) {
       await rust.shellClose(sessionId: id);
     }
@@ -3114,8 +3285,9 @@ class _ShellScreenState extends State<ShellScreen> {
       await rust.saveSettings(settings: s);
       appSettings.value = s;
       await _saveDesktopState();
+      _clearSidebarError();
     } catch (e) {
-      if (mounted) setState(() => _sidebarError = e.toString());
+      _setSidebarError(e);
     }
   }
 
@@ -3421,6 +3593,21 @@ class _ShellScreenState extends State<ShellScreen> {
                     ),
                   ],
                 ),
+                if (_sidebarError != null && _sidebarError!.isNotEmpty)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: ShellErrorBanner(
+                          message: _sidebarError!,
+                          onDismiss: _clearSidebarError,
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_paletteOpen)
                   _CommandPalette(
                     profiles: _profiles,

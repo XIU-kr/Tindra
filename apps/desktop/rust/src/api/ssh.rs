@@ -2,13 +2,29 @@
 // into tindra-ssh / russh + tindra-term / vt100).
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use crate::frb_generated::StreamSink;
 use tindra_core::pty::detect_zrqinit;
 use tindra_core::term::{vt100::Parser, Snapshot as CoreSnapshot};
 use tokio::sync::{broadcast, Mutex};
+
+const SSH_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const SSH_CONNECT_TIMEOUT_MESSAGE: &str = "connection timed out after 20 seconds";
+
+async fn with_connect_timeout<T, E, Fut>(future: Fut) -> Result<T, String>
+where
+    Fut: Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    tokio::time::timeout(SSH_CONNECT_TIMEOUT, future)
+        .await
+        .map_err(|_| SSH_CONNECT_TIMEOUT_MESSAGE.to_string())?
+        .map_err(|e| e.to_string())
+}
 
 /// Phase 8d framework hook — best-effort detection of the ZMODEM ZRQINIT
 /// header in raw remote output. Returns true when a sender is starting a
@@ -271,7 +287,7 @@ pub async fn open_shell_pubkey(
     rows: u32,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    let id = tindra_core::ssh::open_shell_pubkey(
+    let id = with_connect_timeout(tindra_core::ssh::open_shell_pubkey(
         host,
         port,
         username,
@@ -280,9 +296,8 @@ pub async fn open_shell_pubkey(
         cols,
         rows,
         jump_to_core(jump),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    ))
+    .await?;
     register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
     Ok(id)
 }
@@ -291,14 +306,13 @@ pub async fn probe_host_key(
     host: String,
     port: u16,
 ) -> Result<crate::api::profiles::HostKeyCheck, String> {
-    tindra_core::ssh::probe_host_key(host, port)
+    with_connect_timeout(tindra_core::ssh::probe_host_key(host, port))
         .await
         .map(|c| crate::api::profiles::HostKeyCheck {
             status: c.status,
             expected: c.expected,
             actual: c.actual,
         })
-        .map_err(|e| e.to_string())
 }
 
 pub async fn probe_host_key_via_jump(
@@ -307,14 +321,13 @@ pub async fn probe_host_key_via_jump(
     jump: JumpHost,
 ) -> Result<crate::api::profiles::HostKeyCheck, String> {
     let jump = jump_to_core(jump).ok_or_else(|| "jump host is required".to_string())?;
-    tindra_core::ssh::probe_host_key_via_jump(jump, host, port)
+    with_connect_timeout(tindra_core::ssh::probe_host_key_via_jump(jump, host, port))
         .await
         .map(|c| crate::api::profiles::HostKeyCheck {
             status: c.status,
             expected: c.expected,
             actual: c.actual,
         })
-        .map_err(|e| e.to_string())
 }
 
 pub async fn open_shell_password(
@@ -326,7 +339,7 @@ pub async fn open_shell_password(
     rows: u32,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    let id = tindra_core::ssh::open_shell_password(
+    let id = with_connect_timeout(tindra_core::ssh::open_shell_password(
         host,
         port,
         username,
@@ -334,9 +347,8 @@ pub async fn open_shell_password(
         cols,
         rows,
         jump_to_core(jump),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    ))
+    .await?;
     register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
     Ok(id)
 }
@@ -350,7 +362,7 @@ pub async fn open_shell_keyboard_interactive(
     rows: u32,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    let id = tindra_core::ssh::open_shell_keyboard_interactive(
+    let id = with_connect_timeout(tindra_core::ssh::open_shell_keyboard_interactive(
         host,
         port,
         username,
@@ -358,9 +370,8 @@ pub async fn open_shell_keyboard_interactive(
         cols,
         rows,
         jump_to_core(jump),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    ))
+    .await?;
     register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
     Ok(id)
 }
@@ -437,10 +448,15 @@ pub async fn open_shell_agent(
     rows: u32,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    let id =
-        tindra_core::ssh::open_shell_agent(host, port, username, cols, rows, jump_to_core(jump))
-            .await
-            .map_err(|e| e.to_string())?;
+    let id = with_connect_timeout(tindra_core::ssh::open_shell_agent(
+        host,
+        port,
+        username,
+        cols,
+        rows,
+        jump_to_core(jump),
+    ))
+    .await?;
     register_session_meta(id, rows, cols, SessionBackend::Ssh).await;
     Ok(id)
 }

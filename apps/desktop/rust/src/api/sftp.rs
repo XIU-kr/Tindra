@@ -1,12 +1,28 @@
 // FFI surface for Phase 6 SFTP browser.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::Duration;
 
 use crate::api::ssh::{jump_to_core_pub, JumpHost};
 use crate::frb_generated::StreamSink;
+
+const SFTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const SFTP_CONNECT_TIMEOUT_MESSAGE: &str = "connection timed out after 20 seconds";
+
+async fn with_connect_timeout<T, E, Fut>(future: Fut) -> Result<T, String>
+where
+    Fut: Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    tokio::time::timeout(SFTP_CONNECT_TIMEOUT, future)
+        .await
+        .map_err(|_| SFTP_CONNECT_TIMEOUT_MESSAGE.to_string())?
+        .map_err(|e| e.to_string())
+}
 
 fn transfer_cancellations() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     static CANCELLATIONS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
@@ -77,16 +93,15 @@ pub async fn open_sftp_pubkey(
     passphrase: Option<String>,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    tindra_core::sftp::open_sftp_pubkey(
+    with_connect_timeout(tindra_core::sftp::open_sftp_pubkey(
         host,
         port,
         username,
         PathBuf::from(private_key_path),
         passphrase,
         jump_to_core_pub(jump),
-    )
+    ))
     .await
-    .map_err(|e| e.to_string())
 }
 
 pub async fn open_sftp_agent(
@@ -95,9 +110,13 @@ pub async fn open_sftp_agent(
     username: String,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    tindra_core::sftp::open_sftp_agent(host, port, username, jump_to_core_pub(jump))
-        .await
-        .map_err(|e| e.to_string())
+    with_connect_timeout(tindra_core::sftp::open_sftp_agent(
+        host,
+        port,
+        username,
+        jump_to_core_pub(jump),
+    ))
+    .await
 }
 
 pub async fn open_sftp_password(
@@ -107,9 +126,14 @@ pub async fn open_sftp_password(
     password: String,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    tindra_core::sftp::open_sftp_password(host, port, username, password, jump_to_core_pub(jump))
-        .await
-        .map_err(|e| e.to_string())
+    with_connect_timeout(tindra_core::sftp::open_sftp_password(
+        host,
+        port,
+        username,
+        password,
+        jump_to_core_pub(jump),
+    ))
+    .await
 }
 
 pub async fn open_sftp_keyboard_interactive(
@@ -119,15 +143,14 @@ pub async fn open_sftp_keyboard_interactive(
     responses: Vec<String>,
     jump: JumpHost,
 ) -> Result<u64, String> {
-    tindra_core::sftp::open_sftp_keyboard_interactive(
+    with_connect_timeout(tindra_core::sftp::open_sftp_keyboard_interactive(
         host,
         port,
         username,
         responses,
         jump_to_core_pub(jump),
-    )
+    ))
     .await
-    .map_err(|e| e.to_string())
 }
 
 pub async fn sftp_list(session_id: u64, path: String) -> Result<Vec<SftpEntry>, String> {

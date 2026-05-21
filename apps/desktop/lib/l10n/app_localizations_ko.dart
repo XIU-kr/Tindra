@@ -244,6 +244,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get sessionDisconnectedMessage => '세션 연결이 끊어졌습니다.';
 
   @override
+  String get connectionTimedOut => '연결 시간이 20초를 초과했습니다.';
+
+  @override
+  String get cancelConnection => '연결 취소';
+
+  @override
   String get waitingForFirstChunk => '첫 터미널 출력을 기다리는 중';
 
   @override

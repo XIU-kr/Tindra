@@ -72,6 +72,8 @@
   "disconnected": "Disconnected",
   "sessionDisconnected": "Session disconnected",
   "sessionDisconnectedMessage": "The session is disconnected.",
+  "connectionTimedOut": "Connection timed out after 20 seconds.",
+  "cancelConnection": "Cancel connection",
   "waitingForFirstChunk": "Waiting for first terminal output",
   "copyScreenTooltip": "Copy screen (Ctrl+Shift+C)",
   "pasteClipboardTooltip": "Paste clipboard (Ctrl+Shift+V)",
