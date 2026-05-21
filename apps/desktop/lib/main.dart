@@ -157,11 +157,22 @@ final ValueNotifier<rust.Settings> appSettings = ValueNotifier(
   ),
 );
 
-/// User-pickable accent. One of: rose, amber, emerald, sky, violet.
-final ValueNotifier<String> appAccent = ValueNotifier('rose');
+/// User-pickable Nordfjord palette accent.
+final ValueNotifier<String> appAccent = ValueNotifier('frost');
 
 /// Compact-density toggle.
 final ValueNotifier<bool> appDense = ValueNotifier(false);
+
+const _accentChoices = <(String, String)>[
+  ('frost', 'FROST'),
+  ('aurora', 'AURORA'),
+  ('glacier', 'GLACIER'),
+  ('twilight', 'TWILIGHT'),
+  ('coal', 'COAL'),
+  ('snow', 'SNOW'),
+  ('rose', 'ROSE'),
+  ('amber', 'AMBER'),
+];
 
 enum _TerminalCursorStyle { block, bar, underline }
 
@@ -297,64 +308,94 @@ final ValueNotifier<_ShortcutPrefs> shortcutPrefs = ValueNotifier(
 );
 
 // ============================================================================
-// Design tokens ??warm-leaning neutrals + single-chroma accent rotation
+// Design tokens: Nordfjord palette family from the canvas handoff.
 // ============================================================================
 
 class _Pal {
-  // Dark
-  static const dBg0 = Color(0xFF101214);
-  static const dBg1 = Color(0xFF16191D);
-  static const dBg2 = Color(0xFF1D2228);
-  static const dBg3 = Color(0xFF252B33);
-  static const dLine = Color(0xFF2B323B);
-  static const dLine2 = Color(0xFF3A4450);
-  static const dInk0 = Color(0xFFF2F5F7);
-  static const dInk1 = Color(0xFFC9D1D9);
-  static const dInk2 = Color(0xFF8B98A6);
-  static const dInk3 = Color(0xFF64707D);
-  static const dTBg = Color(0xFF0C0F12);
-  static const dTFg = Color(0xFFE6EDF3);
+  // Nordfjord Frost
+  static const dBg0 = Color(0xFF161A22);
+  static const dBg1 = Color(0xFF1C212B);
+  static const dBg2 = Color(0xFF232938);
+  static const dBg3 = Color(0xFF2B3242);
+  static const dLine = Color(0xFF262D3A);
+  static const dLine2 = Color(0xFF323A4A);
+  static const dInk0 = Color(0xFFE5EAF2);
+  static const dInk1 = Color(0xFFAEB8C9);
+  static const dInk2 = Color(0xFF7B8699);
+  static const dInk3 = Color(0xFF525C70);
+  static const dTBg = Color(0xFF11151C);
+  static const dTFg = Color(0xFFD8DEE9);
 
-  // Light
-  static const lBg0 = Color(0xFFF4F6F8);
-  static const lBg1 = Color(0xFFFFFFFF);
-  static const lBg2 = Color(0xFFFFFFFF);
-  static const lBg3 = Color(0xFFEAEFF4);
-  static const lLine = Color(0xFFDCE3EA);
-  static const lLine2 = Color(0xFFC7D0DA);
-  static const lInk0 = Color(0xFF15191E);
-  static const lInk1 = Color(0xFF303842);
-  static const lInk2 = Color(0xFF637181);
-  static const lInk3 = Color(0xFF8A96A3);
-  static const lTBg = Color(0xFFFBFCFD);
-  static const lTFg = Color(0xFF15191E);
+  // Nordfjord Coal
+  static const cBg0 = Color(0xFF0A0C11);
+  static const cBg1 = Color(0xFF0F1218);
+  static const cBg2 = Color(0xFF171A22);
+  static const cBg3 = Color(0xFF22262E);
+  static const cLine = Color(0xFF1A1E26);
+  static const cLine2 = Color(0xFF262B36);
+  static const cTBg = Color(0xFF06080C);
 
-  // Accents ??rotated by [appAccent]
-  static const cRose = Color(0xFFE3667D);
-  static const cAmber = Color(0xFFD99A3A);
-  static const cEmerald = Color(0xFF4CAF86);
-  static const cSky = Color(0xFF5D9BE8);
-  static const cViolet = Color(0xFF9A7BE8);
-  static const cSlate = Color(0xFF8A8475);
+  // Nordfjord Snow
+  static const lBg0 = Color(0xFFECEFF4);
+  static const lBg1 = Color(0xFFE5E9F0);
+  static const lBg2 = Color(0xFFD8DEE9);
+  static const lBg3 = Color(0xFFC9D0DD);
+  static const lLine = Color(0xFFD8DEE9);
+  static const lLine2 = Color(0xFFC0C8D6);
+  static const lInk0 = Color(0xFF2E3440);
+  static const lInk1 = Color(0xFF434C5E);
+  static const lInk2 = Color(0xFF5E6776);
+  static const lInk3 = Color(0xFF838B98);
+  static const lTBg = Color(0xFFF4F6FA);
+  static const lTFg = Color(0xFF2E3440);
+
+  // Nordfjord accents
+  static const cFrost = Color(0xFF88C0D0);
+  static const cAurora = Color(0xFFA3BE8C);
+  static const cGlacier = Color(0xFF81A1C1);
+  static const cTwilight = Color(0xFFB48EAD);
+  static const cCoal = Color(0xFF8FBCBB);
+  static const cSnow = Color(0xFF4C7B8C);
+  static const cRose = Color(0xFFBF616A);
+  static const cAmber = Color(0xFFEBCB8B);
+  static const cEmerald = cAurora;
+  static const cSky = cFrost;
+  static const cViolet = cTwilight;
+  static const cSlate = Color(0xFF4C566A);
 }
 
-bool get _isLight => appSettings.value.theme == 'light';
+bool get _isLight =>
+    appSettings.value.theme == 'light' || appAccent.value == 'snow';
+bool get _isCoal => !_isLight && appAccent.value == 'coal';
 
-Color get _bg0 => _isLight ? _Pal.lBg0 : _Pal.dBg0;
-Color get _bg1 => _isLight ? _Pal.lBg1 : _Pal.dBg1;
-Color get _bg2 => _isLight ? _Pal.lBg2 : _Pal.dBg2;
-Color get _bg3 => _isLight ? _Pal.lBg3 : _Pal.dBg3;
-Color get _line => _isLight ? _Pal.lLine : _Pal.dLine;
-Color get _line2 => _isLight ? _Pal.lLine2 : _Pal.dLine2;
+Color get _bg0 => _isLight ? _Pal.lBg0 : (_isCoal ? _Pal.cBg0 : _Pal.dBg0);
+Color get _bg1 => _isLight ? _Pal.lBg1 : (_isCoal ? _Pal.cBg1 : _Pal.dBg1);
+Color get _bg2 => _isLight ? _Pal.lBg2 : (_isCoal ? _Pal.cBg2 : _Pal.dBg2);
+Color get _bg3 => _isLight ? _Pal.lBg3 : (_isCoal ? _Pal.cBg3 : _Pal.dBg3);
+Color get _line => _isLight ? _Pal.lLine : (_isCoal ? _Pal.cLine : _Pal.dLine);
+Color get _line2 =>
+    _isLight ? _Pal.lLine2 : (_isCoal ? _Pal.cLine2 : _Pal.dLine2);
 Color get _ink0 => _isLight ? _Pal.lInk0 : _Pal.dInk0;
 Color get _ink1 => _isLight ? _Pal.lInk1 : _Pal.dInk1;
 Color get _ink2 => _isLight ? _Pal.lInk2 : _Pal.dInk2;
 Color get _ink3 => _isLight ? _Pal.lInk3 : _Pal.dInk3;
-Color get _tBg => _isLight ? _Pal.lTBg : _Pal.dTBg;
+Color get _tBg => _isLight ? _Pal.lTBg : (_isCoal ? _Pal.cTBg : _Pal.dTBg);
 Color get _tFg => _isLight ? _Pal.lTFg : _Pal.dTFg;
 
 Color colorForAccent(String name) {
   switch (name) {
+    case 'frost':
+      return _Pal.cFrost;
+    case 'aurora':
+      return _Pal.cAurora;
+    case 'glacier':
+      return _Pal.cGlacier;
+    case 'twilight':
+      return _Pal.cTwilight;
+    case 'coal':
+      return _Pal.cCoal;
+    case 'snow':
+      return _Pal.cSnow;
     case 'amber':
       return _Pal.cAmber;
     case 'emerald':
@@ -366,8 +407,9 @@ Color colorForAccent(String name) {
     case 'slate':
       return _Pal.cSlate;
     case 'rose':
-    default:
       return _Pal.cRose;
+    default:
+      return _Pal.cFrost;
   }
 }
 
@@ -825,6 +867,13 @@ class _DetachedNativeWindowApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true),
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
       home: _DetachedNativeShell(arguments: arguments),
     );
   }
@@ -1353,6 +1402,202 @@ class _ShellScreenState extends State<ShellScreen> {
     await _openProfileAsTab(p, splitInto: splitInto, axis: axis);
   }
 
+  Future<rust.Profile?> _pickProfileForConnection(String title) async {
+    final filter = TextEditingController();
+    try {
+      return await showDialog<rust.Profile>(
+        context: context,
+        builder: (dialogContext) {
+          final l10n = AppLocalizations.of(dialogContext);
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              final q = filter.text.trim().toLowerCase();
+              final matches = _profiles.where((p) {
+                if (q.isEmpty) return true;
+                return p.name.toLowerCase().contains(q) ||
+                    p.host.toLowerCase().contains(q) ||
+                    p.username.toLowerCase().contains(q) ||
+                    p.notes.toLowerCase().contains(q);
+              }).toList();
+              return AlertDialog(
+                title: Text(title),
+                insetPadding: const EdgeInsets.symmetric(
+                  horizontal: 40,
+                  vertical: 28,
+                ),
+                contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+                content: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: 480,
+                    maxWidth: 560,
+                    maxHeight: 520,
+                  ),
+                  child: SizedBox(
+                    width: 520,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: filter,
+                                autofocus: true,
+                                decoration: InputDecoration(
+                                  prefixIcon: const Icon(
+                                    Icons.search,
+                                    size: 18,
+                                  ),
+                                  labelText: l10n.search,
+                                ),
+                                onChanged: (_) => setDialogState(() {}),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _TinyButton(
+                              icon: Icons.add,
+                              label: l10n.newProfile,
+                              onTap: () async {
+                                final saved = await _createProfileFromPicker();
+                                if (saved == null || !dialogContext.mounted) {
+                                  return;
+                                }
+                                Navigator.pop(dialogContext, saved);
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 360,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: _line),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: matches.isEmpty
+                                ? Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Text(
+                                        l10n.noProfilesYet,
+                                        style: _sans(size: 13, color: _ink2),
+                                      ),
+                                    ),
+                                  )
+                                : ListView.separated(
+                                    itemCount: matches.length,
+                                    separatorBuilder: (_, _) =>
+                                        Divider(height: 1, color: _line),
+                                    itemBuilder: (_, i) {
+                                      final p = matches[i];
+                                      return ListTile(
+                                        dense: true,
+                                        minLeadingWidth: 18,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 4,
+                                            ),
+                                        leading: _BarMark(
+                                          accent: _accentForProfile(p),
+                                        ),
+                                        title: Text(
+                                          p.name,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: _sans(
+                                            size: 13.5,
+                                            color: _ink0,
+                                            weight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          '${p.username}@${p.host}:${p.port}',
+                                          overflow: TextOverflow.ellipsis,
+                                          style: _mono(
+                                            size: 11.5,
+                                            color: _ink3,
+                                          ),
+                                        ),
+                                        trailing: Text(
+                                          p.authMethod,
+                                          style: _mono(
+                                            size: 10.5,
+                                            color: _ink3,
+                                          ),
+                                        ),
+                                        onTap: () =>
+                                            Navigator.pop(dialogContext, p),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton.icon(
+                    onPressed: () async {
+                      final saved = await _createProfileFromPicker();
+                      if (saved == null || !dialogContext.mounted) return;
+                      Navigator.pop(dialogContext, saved);
+                    },
+                    icon: const Icon(Icons.add, size: 16),
+                    label: Text(l10n.newProfile),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: Text(l10n.cancel),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      filter.dispose();
+    }
+  }
+
+  Future<rust.Profile?> _createProfileFromPicker() async {
+    final result = await showDialog<rust.Profile>(
+      context: context,
+      builder: (_) => const _ProfileDialog(),
+    );
+    if (result == null) return null;
+    try {
+      final saved = await rust.upsertProfile(profile: result);
+      await _refreshProfiles();
+      if (mounted) setState(() => _selectedProfileId = saved.id);
+      return saved;
+    } catch (e) {
+      if (mounted) setState(() => _sidebarError = e.toString());
+      return null;
+    }
+  }
+
+  Future<void> _openProfilePickerAsTab() async {
+    final l10n = AppLocalizations.of(context);
+    final profile = await _pickProfileForConnection(l10n.pickProfileForNewTab);
+    if (profile == null) return;
+    setState(() => _selectedProfileId = profile.id);
+    await _openProfileAsTab(profile);
+  }
+
+  Future<void> _openProfilePickerAsSplit(Axis axis) async {
+    final group = _activeGroup;
+    if (group == null) return;
+    final l10n = AppLocalizations.of(context);
+    final profile = await _pickProfileForConnection(l10n.pickProfileForSplit);
+    if (profile == null) return;
+    setState(() => _selectedProfileId = profile.id);
+    await _openProfileAsTab(profile, splitInto: group, axis: axis);
+  }
+
   Future<void> _openProfileAsTab(
     rust.Profile p, {
     _TabGroup? splitInto,
@@ -1472,6 +1717,7 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Future<void> _openQuickConnectDialog() async {
+    final l10n = AppLocalizations.of(context);
     final controller = TextEditingController();
     try {
       final raw = await showDialog<String>(
@@ -1482,7 +1728,7 @@ class _ShellScreenState extends State<ShellScreen> {
             final isFavorite =
                 current.isNotEmpty && _quickConnectFavorites.contains(current);
             return AlertDialog(
-              title: const Text('Quick connect'),
+              title: Text(l10n.quickConnect),
               content: SizedBox(
                 width: 420,
                 child: Column(
@@ -1901,13 +2147,13 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   Future<void> _splitHorizontal() async {
-    if (_activeGroup == null || _selectedProfile == null) return;
-    await _connectSelected(splitInto: _activeGroup, axis: Axis.horizontal);
+    if (_activeGroup == null) return;
+    await _openProfilePickerAsSplit(Axis.horizontal);
   }
 
   Future<void> _splitVertical() async {
-    if (_activeGroup == null || _selectedProfile == null) return;
-    await _connectSelected(splitInto: _activeGroup, axis: Axis.vertical);
+    if (_activeGroup == null) return;
+    await _openProfilePickerAsSplit(Axis.vertical);
   }
 
   void _moveTabGroup(int from, int to) {
@@ -2270,27 +2516,28 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Future<void> _renameTabGroup(int idx) async {
     if (idx < 0 || idx >= _tabs.length) return;
+    final l10n = AppLocalizations.of(context);
     final group = _tabs[idx];
     final controller = TextEditingController(text: group.displayName);
     try {
       final name = await showDialog<String>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('Rename tab'),
+          title: Text(l10n.renameTab),
           content: TextField(
             controller: controller,
             autofocus: true,
-            decoration: const InputDecoration(labelText: 'Tab name'),
+            decoration: InputDecoration(labelText: l10n.tabName),
             onSubmitted: (_) => Navigator.pop(context, controller.text),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
+              child: Text(l10n.cancel),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Rename'),
+              child: Text(l10n.renameTab),
             ),
           ],
         ),
@@ -3083,14 +3330,20 @@ class _ShellScreenState extends State<ShellScreen> {
                             duration: const Duration(milliseconds: 160),
                             switchInCurve: Curves.easeOut,
                             switchOutCurve: Curves.easeIn,
-                            child: _sidebarCollapsed
-                                ? const SizedBox.shrink()
-                                : _Sidebar(
-                                    view: _view,
-                                    sessionsCount: _tabs.length,
-                                    onView: (v) => setState(() => _view = v),
-                                    onPalette: _togglePalette,
-                                  ),
+                            child: _Sidebar(
+                              key: ValueKey(_sidebarCollapsed),
+                              view: _view,
+                              sessionsCount: _tabs.length,
+                              collapsed: _sidebarCollapsed,
+                              onToggleCollapsed: () {
+                                setState(
+                                  () => _sidebarCollapsed = !_sidebarCollapsed,
+                                );
+                                _saveDesktopState();
+                              },
+                              onView: (v) => setState(() => _view = v),
+                              onPalette: _togglePalette,
+                            ),
                           ),
                           Expanded(child: _mainArea()),
                         ],
@@ -3205,7 +3458,7 @@ class _ShellScreenState extends State<ShellScreen> {
                     onMove: _moveDetachedTabGroup,
                     onReattach: _reattachDetachedTabGroup,
                     onClose: _closeDetachedTabGroup,
-                    onAddTab: _connectSelected,
+                    onAddTab: _openProfilePickerAsTab,
                     onSplitH: _splitHorizontal,
                     onSplitV: _splitVertical,
                     onCopy: _copyScreen,
@@ -3281,48 +3534,6 @@ class _ShellScreenState extends State<ShellScreen> {
                   onTap: () => _openProfileDialog(),
                 ),
               ],
-            ),
-            const SizedBox(height: 24),
-            _BlockHead(title: l10n.quickstart, sub: l10n.pressPaletteHint),
-            Container(
-              decoration: BoxDecoration(
-                color: _bg1,
-                border: Border.all(color: _line, style: BorderStyle.solid),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.all(40),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: _bg2,
-                        border: Border.all(color: _line2),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        r'$',
-                        style: GoogleFonts.jetBrainsMono(
-                          fontSize: 20,
-                          color: _acc,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(l10n.noOpenSessions, style: _display(size: 22)),
-                    const SizedBox(height: 6),
-                    Text(
-                      l10n.pickProfileOrPalette,
-                      style: _sans(color: _ink2, size: 13.5),
-                    ),
-                  ],
-                ),
-              ),
             ),
             const SizedBox(height: 24),
             _BlockHead(title: l10n.profiles, tools: _filterChips()),
@@ -3455,12 +3666,13 @@ class _ShellScreenState extends State<ShellScreen> {
     onSetTabColor: _setTabGroupColor,
     onSplitDrop: _dropTabGroupIntoSplit,
     onDetachDrop: _detachTabGroup,
+    onDetachActive: _detachActiveTabGroup,
     onResizeSplit: _resizeSplit,
     onActivateSplit: _activateSplitPane,
     onFocusPrevSplit: () => _focusAdjacentSplitPane(-1),
     onFocusNextSplit: () => _focusAdjacentSplitPane(1),
     onToggleMaximizeSplit: _toggleMaximizeSplitPane,
-    onAddTab: _connectSelected,
+    onAddTab: _openProfilePickerAsTab,
     onSplitH: _splitHorizontal,
     onSplitV: _splitVertical,
     onCopy: _copyScreen,
@@ -3623,9 +3835,8 @@ class _ViewHead extends StatelessWidget {
 }
 
 class _BlockHead extends StatelessWidget {
-  const _BlockHead({required this.title, this.sub, this.tools});
+  const _BlockHead({required this.title, this.tools});
   final String title;
-  final String? sub;
   final dynamic tools; // String? or List<Widget>?
 
   @override
@@ -3655,7 +3866,6 @@ class _BlockHead extends StatelessWidget {
           children: [
             Text(title.toUpperCase(), style: _blockHead()),
             const Spacer(),
-            if (sub != null) Text(sub!, style: _blockSub()),
             ?right,
           ],
         ),
@@ -5108,21 +5318,16 @@ class _SettingsViewState extends State<_SettingsView> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              for (final a in const [
-                'rose',
-                'amber',
-                'emerald',
-                'sky',
-                'violet',
-              ])
+              for (final a in _accentChoices)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: _Swatch(
-                    color: colorForAccent(a),
-                    selected: _accent == a,
+                    color: colorForAccent(a.$1),
+                    label: _accentLabel(l10n, a.$1),
+                    selected: _accent == a.$1,
                     onTap: () {
-                      setState(() => _accent = a);
-                      appAccent.value = a;
+                      setState(() => _accent = a.$1);
+                      appAccent.value = a.$1;
                     },
                   ),
                 ),
@@ -5145,20 +5350,20 @@ class _SettingsViewState extends State<_SettingsView> {
           ),
         ),
         _SRow(
-          label: 'Theme preset',
-          hint: 'Copy or paste appearance JSON',
+          label: l10n.themePreset,
+          hint: l10n.themePresetHint,
           child: Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               _TinyButton(
                 icon: Icons.upload_outlined,
-                label: 'Export',
+                label: l10n.exportTheme,
                 onTap: _exportThemeToClipboard,
               ),
               _TinyButton(
                 icon: Icons.download_outlined,
-                label: 'Import',
+                label: l10n.importTheme,
                 onTap: _importThemeFromClipboard,
               ),
             ],
@@ -5166,6 +5371,20 @@ class _SettingsViewState extends State<_SettingsView> {
         ),
       ],
     );
+  }
+
+  String _accentLabel(AppLocalizations l10n, String value) {
+    return switch (value) {
+      'frost' => l10n.paletteFrost,
+      'aurora' => l10n.paletteAurora,
+      'glacier' => l10n.paletteGlacier,
+      'twilight' => l10n.paletteTwilight,
+      'coal' => l10n.paletteCoal,
+      'snow' => l10n.paletteSnow,
+      'rose' => l10n.paletteRose,
+      'amber' => l10n.paletteAmber,
+      _ => value,
+    };
   }
 
   Widget _terminalGroup() {
@@ -5315,12 +5534,13 @@ class _SettingsViewState extends State<_SettingsView> {
   }
 
   Widget _keybindingGroup() {
+    final l10n = AppLocalizations.of(context);
     return _SGroup(
-      title: 'Keyboard shortcuts',
+      title: l10n.keyboardShortcuts,
       children: [
         for (final action in _defaultShortcutBindings.keys)
           _SRow(
-            label: _shortcutLabels[action] ?? action,
+            label: _shortcutLabel(l10n, action),
             child: _ShortcutCapture(
               value:
                   _shortcutBindings[action] ??
@@ -5334,6 +5554,34 @@ class _SettingsViewState extends State<_SettingsView> {
           ),
       ],
     );
+  }
+
+  String _shortcutLabel(AppLocalizations l10n, String action) {
+    return switch (action) {
+      'newTab' => l10n.newTab,
+      'closeTab' => l10n.closeTab,
+      'nextTab' => l10n.nextTab,
+      'prevTab' => l10n.previousTab,
+      'palette' => l10n.commandPalette,
+      'settings' => l10n.settings,
+      'splitRight' => l10n.splitRight,
+      'splitDown' => l10n.splitDown,
+      'copy' => l10n.copy,
+      'paste' => l10n.paste,
+      'reconnect' => l10n.reconnect,
+      'duplicateTab' => l10n.duplicateTab,
+      'closeOtherTabs' => l10n.closeOtherTabs,
+      'closeTabsToRight' => l10n.closeTabsToRight,
+      'prevPane' => l10n.previousPane,
+      'nextPane' => l10n.nextPane,
+      'maximizePane' => l10n.maximizePane,
+      'moveTabLeft' => l10n.moveTabLeft,
+      'moveTabRight' => l10n.moveTabRight,
+      'detachTab' => l10n.detachTab,
+      'pinTab' => l10n.pinTab,
+      'closePane' => l10n.closePane,
+      _ => _shortcutLabels[action] ?? action,
+    };
   }
 
   Widget _syncGroup(AppLocalizations l10n) {
@@ -5694,26 +5942,31 @@ class _Seg<T> extends StatelessWidget {
 class _Swatch extends StatelessWidget {
   const _Swatch({
     required this.color,
+    required this.label,
     required this.selected,
     required this.onTap,
   });
   final Color color;
+  final String label;
   final bool selected;
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 26,
-        height: 26,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: selected ? _ink0 : Colors.transparent,
-            width: 2,
+    return Tooltip(
+      message: label,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(
+              color: selected ? _ink0 : _line2,
+              width: selected ? 2 : 1,
+            ),
           ),
         ),
       ),

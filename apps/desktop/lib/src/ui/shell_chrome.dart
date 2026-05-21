@@ -22,11 +22,7 @@ class _TitleBar extends StatelessWidget {
       child: Container(
         height: 36,
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [_bg1, _bg0],
-          ),
+          color: _bg1,
           border: Border(bottom: BorderSide(color: _line)),
         ),
         child: Stack(
@@ -204,14 +200,19 @@ class _IconBtnState extends State<_IconBtn> {
 
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
+    super.key,
     required this.view,
     required this.sessionsCount,
+    required this.collapsed,
+    required this.onToggleCollapsed,
     required this.onView,
     required this.onPalette,
   });
 
   final _View view;
   final int sessionsCount;
+  final bool collapsed;
+  final VoidCallback onToggleCollapsed;
   final ValueChanged<_View> onView;
   final VoidCallback onPalette;
 
@@ -231,17 +232,24 @@ class _Sidebar extends StatelessWidget {
       _NavSpec(_View.keys, Icons.vpn_key_outlined, l10n.hostKeys, null),
       _NavSpec(_View.settings, Icons.tune, l10n.settings, null),
     ];
-    return Container(
-      width: 230,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      width: collapsed ? 56 : 240,
       decoration: BoxDecoration(
         color: _bg1,
         border: Border(right: BorderSide(color: _line)),
       ),
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
+      padding: EdgeInsets.fromLTRB(
+        collapsed ? 8 : 12,
+        14,
+        collapsed ? 8 : 12,
+        14,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _Brand(),
+          _Brand(collapsed: collapsed, onToggleCollapsed: onToggleCollapsed),
           const SizedBox(height: 14),
           Expanded(
             child: ListView(
@@ -251,15 +259,16 @@ class _Sidebar extends StatelessWidget {
                   _NavItem(
                     spec: it,
                     active: it.view == view,
+                    collapsed: collapsed,
                     onTap: () => onView(it.view),
                   ),
               ],
             ),
           ),
           const SizedBox(height: 10),
-          _PaletteTrigger(onTap: onPalette),
+          _PaletteTrigger(collapsed: collapsed, onTap: onPalette),
           const SizedBox(height: 10),
-          const _SyncRow(),
+          _SyncRow(collapsed: collapsed),
         ],
       ),
     );
@@ -275,39 +284,62 @@ class _NavSpec {
 }
 
 class _Brand extends StatelessWidget {
-  const _Brand();
+  const _Brand({required this.collapsed, required this.onToggleCollapsed});
+  final bool collapsed;
+  final VoidCallback onToggleCollapsed;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 8, vertical: 6),
       child: Row(
         children: [
-          _BrandLogo(accent: _acc),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Tindra',
-                style: _display(
-                  size: 19,
-                  weight: FontWeight.w600,
-                  color: _ink0,
-                  letterSpacing: -0.2,
-                ),
+          const _BrandLogo(),
+          if (!collapsed) ...[
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Tindra',
+                    style: _display(
+                      size: 18,
+                      weight: FontWeight.w600,
+                      color: _ink0,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'SSH · SFTP · 26.5.1',
+                    style: _mono(
+                      size: 9.5,
+                      color: _ink3,
+                      letterSpacing: 1.2,
+                      weight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 1),
-              Text(
-                'V0.1 · EARLY',
-                style: _mono(
-                  size: 10,
-                  color: _ink3,
-                  letterSpacing: 1.3,
-                  weight: FontWeight.w500,
-                ),
+            ),
+            _IconBtn(
+              icon: Icons.chevron_left,
+              tooltip: AppLocalizations.of(context).collapseSidebar,
+              iconSize: 16,
+              onTap: onToggleCollapsed,
+            ),
+          ] else ...[
+            const Spacer(),
+            Tooltip(
+              message: AppLocalizations.of(context).expandSidebar,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onToggleCollapsed,
+                child: Icon(Icons.chevron_right, size: 16, color: _ink3),
               ),
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );
@@ -315,36 +347,18 @@ class _Brand extends StatelessWidget {
 }
 
 class _BrandLogo extends StatelessWidget {
-  const _BrandLogo({required this.accent});
-  final Color accent;
+  const _BrandLogo();
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [accent, Color.lerp(accent, Colors.black, 0.25)!],
-        ),
-        border: Border.all(color: Color.lerp(accent, Colors.black, 0.5)!),
-      ),
-      alignment: Alignment.center,
-      child: Transform.rotate(
-        angle: 0.785398, // 45deg
-        child: Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: _Pal.dInk0, width: 2),
-              left: BorderSide(color: _Pal.dInk0, width: 2),
-            ),
-            borderRadius: const BorderRadius.only(topLeft: Radius.circular(2)),
-          ),
-        ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(7),
+      child: Image.asset(
+        'assets/brand/tindra_icon.png',
+        width: 28,
+        height: 28,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
       ),
     );
   }
@@ -354,10 +368,12 @@ class _NavItem extends StatefulWidget {
   const _NavItem({
     required this.spec,
     required this.active,
+    required this.collapsed,
     required this.onTap,
   });
   final _NavSpec spec;
   final bool active;
+  final bool collapsed;
   final VoidCallback onTap;
 
   @override
@@ -391,31 +407,34 @@ class _NavItemState extends State<_NavItem> {
   Widget build(BuildContext context) {
     final active = widget.active;
     final hovering = _hover && !active;
-    final bg = active ? _bg2 : (hovering ? _bg2 : Colors.transparent);
+    final bg = active ? _accSoft : (hovering ? _bg2 : Colors.transparent);
     final color = active ? _ink0 : (hovering ? _ink1 : _ink2);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(6),
-            border: Border(
-              left: BorderSide(
-                color: active ? _acc : Colors.transparent,
-                width: 2,
-              ),
+    final item = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 1),
+        padding: EdgeInsets.symmetric(
+          horizontal: widget.collapsed ? 0 : 10,
+          vertical: 8,
+        ),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(
+              color: active ? _acc : Colors.transparent,
+              width: 2,
             ),
           ),
-          child: Row(
-            children: [
-              Icon(widget.spec.icon, size: 17, color: color),
+        ),
+        child: Row(
+          mainAxisAlignment: widget.collapsed
+              ? MainAxisAlignment.center
+              : MainAxisAlignment.start,
+          children: [
+            Icon(widget.spec.icon, size: 17, color: active ? _acc : color),
+            if (!widget.collapsed) ...[
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -429,15 +448,24 @@ class _NavItemState extends State<_NavItem> {
               ),
               ?_badgeChip(active),
             ],
-          ),
+          ],
         ),
       ),
+    );
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: widget.collapsed
+          ? Tooltip(message: widget.spec.label, child: item)
+          : item,
     );
   }
 }
 
 class _PaletteTrigger extends StatefulWidget {
-  const _PaletteTrigger({required this.onTap});
+  const _PaletteTrigger({required this.collapsed, required this.onTap});
+  final bool collapsed;
   final VoidCallback onTap;
   @override
   State<_PaletteTrigger> createState() => _PaletteTriggerState();
@@ -448,6 +476,13 @@ class _PaletteTriggerState extends State<_PaletteTrigger> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    if (widget.collapsed) {
+      return _IconBtn(
+        icon: Icons.search,
+        tooltip: l10n.searchRun,
+        onTap: widget.onTap,
+      );
+    }
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
@@ -482,13 +517,18 @@ class _PaletteTriggerState extends State<_PaletteTrigger> {
 }
 
 class _SyncRow extends StatelessWidget {
-  const _SyncRow();
+  const _SyncRow({required this.collapsed});
+  final bool collapsed;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 4),
       child: Row(
+        mainAxisAlignment: collapsed
+            ? MainAxisAlignment.center
+            : MainAxisAlignment.start,
         children: [
           Container(
             width: 7,
@@ -505,9 +545,11 @@ class _SyncRow extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 6),
-          Text('${l10n.syncStatus} · ', style: _mono(size: 11, color: _ink3)),
-          Text(l10n.pairedDevices(2), style: _mono(size: 11, color: _ink1)),
+          if (!collapsed) ...[
+            const SizedBox(width: 6),
+            Text('${l10n.syncStatus} · ', style: _mono(size: 11, color: _ink3)),
+            Text(l10n.pairedDevices(2), style: _mono(size: 11, color: _ink1)),
+          ],
         ],
       ),
     );
@@ -619,13 +661,13 @@ class _CommandPaletteState extends State<_CommandPalette> {
     final cmds = [
       _PaletteCmd(
         icon: Icons.bolt_outlined,
-        label: 'Quick connect',
+        label: l10n.quickConnect,
         hint: 'ssh',
         run: widget.onQuickConnect,
       ),
       _PaletteCmd(
         icon: Icons.restore_outlined,
-        label: 'Restore previous layout',
+        label: l10n.restorePreviousLayout,
         hint: null,
         run: widget.onRestoreLayout,
       ),
@@ -655,37 +697,37 @@ class _CommandPaletteState extends State<_CommandPalette> {
       ),
       _PaletteCmd(
         icon: Icons.drive_file_rename_outline,
-        label: 'Rename tab',
+        label: l10n.renameTab,
         hint: null,
         run: widget.onRenameTab,
       ),
       _PaletteCmd(
         icon: Icons.content_copy_outlined,
-        label: 'Duplicate tab',
+        label: l10n.duplicateTab,
         hint: shortcutPrefs.value.bindingFor('duplicateTab'),
         run: widget.onDuplicateTab,
       ),
       _PaletteCmd(
         icon: Icons.filter_1_outlined,
-        label: 'Close other tabs',
+        label: l10n.closeOtherTabs,
         hint: shortcutPrefs.value.bindingFor('closeOtherTabs'),
         run: widget.onCloseOtherTabs,
       ),
       _PaletteCmd(
         icon: Icons.last_page_outlined,
-        label: 'Close tabs to the right',
+        label: l10n.closeTabsToRight,
         hint: shortcutPrefs.value.bindingFor('closeTabsToRight'),
         run: widget.onCloseTabsToRight,
       ),
       _PaletteCmd(
         icon: Icons.keyboard_arrow_left,
-        label: 'Previous pane',
+        label: l10n.previousPane,
         hint: shortcutPrefs.value.bindingFor('prevPane'),
         run: widget.onPrevPane,
       ),
       _PaletteCmd(
         icon: Icons.keyboard_arrow_right,
-        label: 'Next pane',
+        label: l10n.nextPane,
         hint: shortcutPrefs.value.bindingFor('nextPane'),
         run: widget.onNextPane,
       ),
@@ -709,25 +751,25 @@ class _CommandPaletteState extends State<_CommandPalette> {
       ),
       _PaletteCmd(
         icon: Icons.open_in_new_outlined,
-        label: 'Detach tab',
+        label: l10n.detachTab,
         hint: shortcutPrefs.value.bindingFor('detachTab'),
         run: widget.onDetachTab,
       ),
       _PaletteCmd(
         icon: Icons.push_pin_outlined,
-        label: 'Pin or unpin tab',
+        label: l10n.pinOrUnpinTab,
         hint: shortcutPrefs.value.bindingFor('pinTab'),
         run: widget.onPinTab,
       ),
       _PaletteCmd(
         icon: Icons.close_fullscreen_outlined,
-        label: 'Close active pane',
+        label: l10n.closeActivePane,
         hint: shortcutPrefs.value.bindingFor('closePane'),
         run: widget.onClosePane,
       ),
       _PaletteCmd(
         icon: Icons.menu_outlined,
-        label: 'Toggle sidebar',
+        label: l10n.toggleSidebar,
         hint: null,
         run: widget.onToggleSidebar,
       ),
@@ -920,7 +962,7 @@ class _CommandPaletteState extends State<_CommandPalette> {
                                     onTap: () => widget.onOpenProfile(entry.$2),
                                   ),
                                 if (tabMatches.isNotEmpty)
-                                  _section('OPEN TABS'),
+                                  _section(l10n.openTabs.toUpperCase()),
                                 for (final entry in tabMatches.take(8).indexed)
                                   _palItem(
                                     leading: Icon(

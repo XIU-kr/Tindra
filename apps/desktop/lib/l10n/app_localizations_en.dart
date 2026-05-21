@@ -202,6 +202,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pickProfileToOpen => 'Pick a profile to open';
 
   @override
+  String get pickProfileForNewTab => 'Pick a profile for a new tab';
+
+  @override
+  String get pickProfileForSplit => 'Pick a profile for the split pane';
+
+  @override
   String openSelectedProfile(Object name) {
     return 'Open $name';
   }
@@ -668,6 +674,141 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get remoteHost => 'Remote host';
+
+  @override
+  String get quickConnect => 'Quick connect';
+
+  @override
+  String get restorePreviousLayout => 'Restore previous layout';
+
+  @override
+  String get renameTab => 'Rename tab';
+
+  @override
+  String get tabName => 'Tab name';
+
+  @override
+  String get duplicateTab => 'Duplicate tab';
+
+  @override
+  String get closeOtherTabs => 'Close other tabs';
+
+  @override
+  String get closeTabsToRight => 'Close tabs to the right';
+
+  @override
+  String get previousPane => 'Previous pane';
+
+  @override
+  String get nextPane => 'Next pane';
+
+  @override
+  String get detachTab => 'Detach tab';
+
+  @override
+  String get pinOrUnpinTab => 'Pin or unpin tab';
+
+  @override
+  String get pinTab => 'Pin tab';
+
+  @override
+  String get unpinTab => 'Unpin tab';
+
+  @override
+  String get closeActivePane => 'Close active pane';
+
+  @override
+  String get restorePane => 'Restore pane';
+
+  @override
+  String get maximizePane => 'Maximize pane';
+
+  @override
+  String get toggleSidebar => 'Toggle sidebar';
+
+  @override
+  String get collapseSidebar => 'Collapse sidebar';
+
+  @override
+  String get expandSidebar => 'Expand sidebar';
+
+  @override
+  String get openTabs => 'Open tabs';
+
+  @override
+  String get themePreset => 'Theme preset';
+
+  @override
+  String get themePresetHint => 'Copy or paste appearance JSON';
+
+  @override
+  String get exportTheme => 'Export';
+
+  @override
+  String get importTheme => 'Import';
+
+  @override
+  String get keyboardShortcuts => 'Keyboard shortcuts';
+
+  @override
+  String get newTab => 'New tab';
+
+  @override
+  String get closeTab => 'Close tab';
+
+  @override
+  String get nextTab => 'Next tab';
+
+  @override
+  String get previousTab => 'Previous tab';
+
+  @override
+  String get commandPalette => 'Command palette';
+
+  @override
+  String get copy => 'Copy';
+
+  @override
+  String get moveTabLeft => 'Move tab left';
+
+  @override
+  String get moveTabRight => 'Move tab right';
+
+  @override
+  String get closePane => 'Close pane';
+
+  @override
+  String get paletteFrost => 'Frost';
+
+  @override
+  String get paletteAurora => 'Aurora';
+
+  @override
+  String get paletteGlacier => 'Glacier';
+
+  @override
+  String get paletteTwilight => 'Twilight';
+
+  @override
+  String get paletteCoal => 'Coal';
+
+  @override
+  String get paletteSnow => 'Snow';
+
+  @override
+  String get paletteRose => 'Rose';
+
+  @override
+  String get paletteAmber => 'Amber';
+
+  @override
+  String get defaultColor => 'Default color';
+
+  @override
+  String get green => 'Green';
+
+  @override
+  String get blue => 'Blue';
 
   @override
   String get unnamed => '(unnamed)';

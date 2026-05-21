@@ -21,6 +21,7 @@ class _SessionPane extends StatelessWidget {
     required this.onSetTabColor,
     required this.onSplitDrop,
     required this.onDetachDrop,
+    required this.onDetachActive,
     required this.onResizeSplit,
     required this.onActivateSplit,
     required this.onFocusPrevSplit,
@@ -56,6 +57,7 @@ class _SessionPane extends StatelessWidget {
   final void Function(int, Color?) onSetTabColor;
   final void Function(int, Axis) onSplitDrop;
   final Future<void> Function(int) onDetachDrop;
+  final Future<void> Function() onDetachActive;
   final void Function(_TabGroup, int, double) onResizeSplit;
   final void Function(_TabGroup, int) onActivateSplit;
   final VoidCallback onFocusPrevSplit;
@@ -102,6 +104,7 @@ class _SessionPane extends StatelessWidget {
           onSetColor: onSetTabColor,
           onSplitDrop: onSplitDrop,
           onDetachDrop: onDetachDrop,
+          onDetachActive: onDetachActive,
           onAdd: onAddTab,
           onSplitH: onSplitH,
           onSplitV: onSplitV,
@@ -368,6 +371,7 @@ class _DetachedSessionWindow extends StatelessWidget {
                     onSetTabColor: (_, _) {},
                     onSplitDrop: (_, _) {},
                     onDetachDrop: (_) async {},
+                    onDetachActive: () async {},
                     onResizeSplit: (_, _, _) {},
                     onActivateSplit: (group, pane) {
                       group.activeIdx = pane;
@@ -553,6 +557,7 @@ class _TabStrip extends StatelessWidget {
     required this.onSetColor,
     required this.onSplitDrop,
     required this.onDetachDrop,
+    required this.onDetachActive,
     required this.onAdd,
     required this.onSplitH,
     required this.onSplitV,
@@ -573,6 +578,7 @@ class _TabStrip extends StatelessWidget {
   final void Function(int, Color?) onSetColor;
   final void Function(int, Axis) onSplitDrop;
   final Future<void> Function(int) onDetachDrop;
+  final Future<void> Function() onDetachActive;
   final Future<void> Function() onAdd;
   final Future<void> Function() onSplitH;
   final Future<void> Function() onSplitV;
@@ -619,12 +625,12 @@ class _TabStrip extends StatelessWidget {
             ),
           ),
           _TabDropAction(
-            tooltip: 'Detach tab',
+            tooltip: l10n.detachTab,
             onDrop: onDetachDrop,
             child: _IconBtn(
               icon: Icons.open_in_new_outlined,
-              tooltip: 'Detach tab',
-              onTap: null,
+              tooltip: l10n.detachTab,
+              onTap: () => onDetachActive(),
             ),
           ),
           _TabDropAction(
@@ -661,16 +667,13 @@ class _TabStrip extends StatelessWidget {
 
   Widget _addTabButton(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final tooltip = selectedProfile == null
-        ? l10n.pickProfileToOpen
-        : l10n.openProfile(selectedProfile!.name);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       child: Tooltip(
-        message: tooltip,
+        message: l10n.pickProfileForNewTab,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: selectedProfile == null ? null : onAdd,
+          onTap: onAdd,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Icon(Icons.add, size: 14, color: _ink3),
@@ -891,6 +894,7 @@ class _DraggableTabPillState extends State<_DraggableTabPill> {
   }
 
   Future<void> _showTabMenu(BuildContext context, Offset position) async {
+    final l10n = AppLocalizations.of(context);
     final selected = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -900,26 +904,20 @@ class _DraggableTabPillState extends State<_DraggableTabPill> {
         position.dy,
       ),
       items: [
-        const PopupMenuItem(value: 'rename', child: Text('Rename')),
-        const PopupMenuItem(value: 'duplicate', child: Text('Duplicate tab')),
+        PopupMenuItem(value: 'rename', child: Text(l10n.renameTab)),
+        PopupMenuItem(value: 'duplicate', child: Text(l10n.duplicateTab)),
         PopupMenuItem(
           value: 'pin',
-          child: Text(widget.group.pinned ? 'Unpin tab' : 'Pin tab'),
+          child: Text(widget.group.pinned ? l10n.unpinTab : l10n.pinTab),
         ),
-        const PopupMenuItem(
-          value: 'close-others',
-          child: Text('Close other tabs'),
-        ),
-        const PopupMenuItem(
-          value: 'close-right',
-          child: Text('Close tabs to the right'),
-        ),
+        PopupMenuItem(value: 'close-others', child: Text(l10n.closeOtherTabs)),
+        PopupMenuItem(value: 'close-right', child: Text(l10n.closeTabsToRight)),
         const PopupMenuDivider(),
-        const PopupMenuItem(value: 'color:none', child: Text('Default color')),
-        const PopupMenuItem(value: 'color:green', child: Text('Green')),
-        const PopupMenuItem(value: 'color:amber', child: Text('Amber')),
-        const PopupMenuItem(value: 'color:rose', child: Text('Rose')),
-        const PopupMenuItem(value: 'color:blue', child: Text('Blue')),
+        PopupMenuItem(value: 'color:none', child: Text(l10n.defaultColor)),
+        PopupMenuItem(value: 'color:green', child: Text(l10n.green)),
+        PopupMenuItem(value: 'color:amber', child: Text(l10n.paletteAmber)),
+        PopupMenuItem(value: 'color:rose', child: Text(l10n.paletteRose)),
+        PopupMenuItem(value: 'color:blue', child: Text(l10n.blue)),
       ],
     );
     switch (selected) {
@@ -1246,13 +1244,13 @@ class _TermMeta extends StatelessWidget {
           if (splitCount > 1) ...[
             _IconBtn(
               icon: Icons.keyboard_arrow_left,
-              tooltip: 'Previous pane',
+              tooltip: l10n.previousPane,
               onTap: onFocusPrevSplit,
               iconSize: 15,
             ),
             _IconBtn(
               icon: Icons.keyboard_arrow_right,
-              tooltip: 'Next pane',
+              tooltip: l10n.nextPane,
               onTap: onFocusNextSplit,
               iconSize: 15,
             ),
@@ -1260,7 +1258,7 @@ class _TermMeta extends StatelessWidget {
               icon: maximized
                   ? Icons.close_fullscreen_outlined
                   : Icons.open_in_full_outlined,
-              tooltip: maximized ? 'Restore pane' : 'Maximize pane',
+              tooltip: maximized ? l10n.restorePane : l10n.maximizePane,
               onTap: onToggleMaximizeSplit,
               iconSize: 13,
             ),

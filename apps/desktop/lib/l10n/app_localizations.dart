@@ -446,6 +446,18 @@ abstract class AppLocalizations {
   /// **'Pick a profile to open'**
   String get pickProfileToOpen;
 
+  /// No description provided for @pickProfileForNewTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a profile for a new tab'**
+  String get pickProfileForNewTab;
+
+  /// No description provided for @pickProfileForSplit.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a profile for the split pane'**
+  String get pickProfileForSplit;
+
   /// No description provided for @openSelectedProfile.
   ///
   /// In en, this message translates to:
@@ -1308,6 +1320,276 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Remote host'**
   String get remoteHost;
+
+  /// No description provided for @quickConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick connect'**
+  String get quickConnect;
+
+  /// No description provided for @restorePreviousLayout.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore previous layout'**
+  String get restorePreviousLayout;
+
+  /// No description provided for @renameTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename tab'**
+  String get renameTab;
+
+  /// No description provided for @tabName.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab name'**
+  String get tabName;
+
+  /// No description provided for @duplicateTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate tab'**
+  String get duplicateTab;
+
+  /// No description provided for @closeOtherTabs.
+  ///
+  /// In en, this message translates to:
+  /// **'Close other tabs'**
+  String get closeOtherTabs;
+
+  /// No description provided for @closeTabsToRight.
+  ///
+  /// In en, this message translates to:
+  /// **'Close tabs to the right'**
+  String get closeTabsToRight;
+
+  /// No description provided for @previousPane.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous pane'**
+  String get previousPane;
+
+  /// No description provided for @nextPane.
+  ///
+  /// In en, this message translates to:
+  /// **'Next pane'**
+  String get nextPane;
+
+  /// No description provided for @detachTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Detach tab'**
+  String get detachTab;
+
+  /// No description provided for @pinOrUnpinTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin or unpin tab'**
+  String get pinOrUnpinTab;
+
+  /// No description provided for @pinTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin tab'**
+  String get pinTab;
+
+  /// No description provided for @unpinTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin tab'**
+  String get unpinTab;
+
+  /// No description provided for @closeActivePane.
+  ///
+  /// In en, this message translates to:
+  /// **'Close active pane'**
+  String get closeActivePane;
+
+  /// No description provided for @restorePane.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore pane'**
+  String get restorePane;
+
+  /// No description provided for @maximizePane.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximize pane'**
+  String get maximizePane;
+
+  /// No description provided for @toggleSidebar.
+  ///
+  /// In en, this message translates to:
+  /// **'Toggle sidebar'**
+  String get toggleSidebar;
+
+  /// No description provided for @collapseSidebar.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse sidebar'**
+  String get collapseSidebar;
+
+  /// No description provided for @expandSidebar.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand sidebar'**
+  String get expandSidebar;
+
+  /// No description provided for @openTabs.
+  ///
+  /// In en, this message translates to:
+  /// **'Open tabs'**
+  String get openTabs;
+
+  /// No description provided for @themePreset.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme preset'**
+  String get themePreset;
+
+  /// No description provided for @themePresetHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy or paste appearance JSON'**
+  String get themePresetHint;
+
+  /// No description provided for @exportTheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Export'**
+  String get exportTheme;
+
+  /// No description provided for @importTheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get importTheme;
+
+  /// No description provided for @keyboardShortcuts.
+  ///
+  /// In en, this message translates to:
+  /// **'Keyboard shortcuts'**
+  String get keyboardShortcuts;
+
+  /// No description provided for @newTab.
+  ///
+  /// In en, this message translates to:
+  /// **'New tab'**
+  String get newTab;
+
+  /// No description provided for @closeTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Close tab'**
+  String get closeTab;
+
+  /// No description provided for @nextTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Next tab'**
+  String get nextTab;
+
+  /// No description provided for @previousTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous tab'**
+  String get previousTab;
+
+  /// No description provided for @commandPalette.
+  ///
+  /// In en, this message translates to:
+  /// **'Command palette'**
+  String get commandPalette;
+
+  /// No description provided for @copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get copy;
+
+  /// No description provided for @moveTabLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'Move tab left'**
+  String get moveTabLeft;
+
+  /// No description provided for @moveTabRight.
+  ///
+  /// In en, this message translates to:
+  /// **'Move tab right'**
+  String get moveTabRight;
+
+  /// No description provided for @closePane.
+  ///
+  /// In en, this message translates to:
+  /// **'Close pane'**
+  String get closePane;
+
+  /// No description provided for @paletteFrost.
+  ///
+  /// In en, this message translates to:
+  /// **'Frost'**
+  String get paletteFrost;
+
+  /// No description provided for @paletteAurora.
+  ///
+  /// In en, this message translates to:
+  /// **'Aurora'**
+  String get paletteAurora;
+
+  /// No description provided for @paletteGlacier.
+  ///
+  /// In en, this message translates to:
+  /// **'Glacier'**
+  String get paletteGlacier;
+
+  /// No description provided for @paletteTwilight.
+  ///
+  /// In en, this message translates to:
+  /// **'Twilight'**
+  String get paletteTwilight;
+
+  /// No description provided for @paletteCoal.
+  ///
+  /// In en, this message translates to:
+  /// **'Coal'**
+  String get paletteCoal;
+
+  /// No description provided for @paletteSnow.
+  ///
+  /// In en, this message translates to:
+  /// **'Snow'**
+  String get paletteSnow;
+
+  /// No description provided for @paletteRose.
+  ///
+  /// In en, this message translates to:
+  /// **'Rose'**
+  String get paletteRose;
+
+  /// No description provided for @paletteAmber.
+  ///
+  /// In en, this message translates to:
+  /// **'Amber'**
+  String get paletteAmber;
+
+  /// No description provided for @defaultColor.
+  ///
+  /// In en, this message translates to:
+  /// **'Default color'**
+  String get defaultColor;
+
+  /// No description provided for @green.
+  ///
+  /// In en, this message translates to:
+  /// **'Green'**
+  String get green;
+
+  /// No description provided for @blue.
+  ///
+  /// In en, this message translates to:
+  /// **'Blue'**
+  String get blue;
 
   /// No description provided for @unnamed.
   ///

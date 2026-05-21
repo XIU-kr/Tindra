@@ -198,6 +198,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pickProfileToOpen => '열 프로필 선택';
 
   @override
+  String get pickProfileForNewTab => '새 탭에 연결할 프로필 선택';
+
+  @override
+  String get pickProfileForSplit => '분할 패널에 연결할 프로필 선택';
+
+  @override
   String openSelectedProfile(Object name) {
     return '$name 열기';
   }
@@ -659,6 +665,141 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get remoteHost => '원격 호스트';
+
+  @override
+  String get quickConnect => '빠른 연결';
+
+  @override
+  String get restorePreviousLayout => '이전 레이아웃 복원';
+
+  @override
+  String get renameTab => '탭 이름 변경';
+
+  @override
+  String get tabName => '탭 이름';
+
+  @override
+  String get duplicateTab => '탭 복제';
+
+  @override
+  String get closeOtherTabs => '다른 탭 닫기';
+
+  @override
+  String get closeTabsToRight => '오른쪽 탭 닫기';
+
+  @override
+  String get previousPane => '이전 패널';
+
+  @override
+  String get nextPane => '다음 패널';
+
+  @override
+  String get detachTab => '탭 분리';
+
+  @override
+  String get pinOrUnpinTab => '탭 고정 또는 해제';
+
+  @override
+  String get pinTab => '탭 고정';
+
+  @override
+  String get unpinTab => '탭 고정 해제';
+
+  @override
+  String get closeActivePane => '활성 패널 닫기';
+
+  @override
+  String get restorePane => '패널 복원';
+
+  @override
+  String get maximizePane => '패널 최대화';
+
+  @override
+  String get toggleSidebar => '사이드바 전환';
+
+  @override
+  String get collapseSidebar => '사이드바 접기';
+
+  @override
+  String get expandSidebar => '사이드바 펼치기';
+
+  @override
+  String get openTabs => '열린 탭';
+
+  @override
+  String get themePreset => '테마 프리셋';
+
+  @override
+  String get themePresetHint => '외형 JSON을 복사하거나 붙여넣습니다';
+
+  @override
+  String get exportTheme => '내보내기';
+
+  @override
+  String get importTheme => '가져오기';
+
+  @override
+  String get keyboardShortcuts => '키보드 단축키';
+
+  @override
+  String get newTab => '새 탭';
+
+  @override
+  String get closeTab => '탭 닫기';
+
+  @override
+  String get nextTab => '다음 탭';
+
+  @override
+  String get previousTab => '이전 탭';
+
+  @override
+  String get commandPalette => '명령 팔레트';
+
+  @override
+  String get copy => '복사';
+
+  @override
+  String get moveTabLeft => '탭 왼쪽으로 이동';
+
+  @override
+  String get moveTabRight => '탭 오른쪽으로 이동';
+
+  @override
+  String get closePane => '패널 닫기';
+
+  @override
+  String get paletteFrost => '프로스트';
+
+  @override
+  String get paletteAurora => '오로라';
+
+  @override
+  String get paletteGlacier => '글레이셔';
+
+  @override
+  String get paletteTwilight => '트와일라이트';
+
+  @override
+  String get paletteCoal => '콜';
+
+  @override
+  String get paletteSnow => '스노우';
+
+  @override
+  String get paletteRose => '로즈';
+
+  @override
+  String get paletteAmber => '앰버';
+
+  @override
+  String get defaultColor => '기본 색상';
+
+  @override
+  String get green => '초록';
+
+  @override
+  String get blue => '파랑';
 
   @override
   String get unnamed => '(이름 없음)';
