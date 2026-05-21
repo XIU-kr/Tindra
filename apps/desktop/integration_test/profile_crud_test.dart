@@ -13,14 +13,18 @@ import 'package:integration_test/integration_test.dart';
 import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
+import 'test_support.dart';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   late File storeFile;
+  late AppDataSnapshot appDataSnapshot;
   late List<rust.Profile> originalProfiles;
 
   setUpAll(() async {
     await RustLib.init();
+    appDataSnapshot = await AppDataSnapshot.capture();
     storeFile = File(await rust.profilesPath());
     originalProfiles = await rust.listProfiles();
     for (final p in originalProfiles) {
@@ -40,6 +44,7 @@ void main() {
     for (final p in originalProfiles) {
       await rust.upsertProfile(profile: p);
     }
+    await appDataSnapshot.restore();
   });
 
   test('upsert assigns a non-empty id and persists to JSON', () async {

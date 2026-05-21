@@ -15,16 +15,22 @@ import 'package:tindra_desktop/main.dart';
 import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
+import 'test_support.dart';
+
 const _profileName = 'split-test-profile';
 const _keyPath = r'C:\Users\XIU\.ssh\id_ed25519';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
+  late AppDataSnapshot appDataSnapshot;
   late List<rust.Profile> backup;
 
   setUpAll(() async {
     await RustLib.init();
+    appDataSnapshot = await AppDataSnapshot.capture();
+    await appDataSnapshot.clearDesktopState();
+    await useEnglishTestSettings();
     backup = await rust.listProfiles();
     for (final p in backup) {
       await rust.deleteProfile(id: p.id);
@@ -46,6 +52,7 @@ void main() {
         transport: 'ssh',
       ),
     );
+    await trustLocalhostHostKey();
   });
 
   tearDownAll(() async {
@@ -55,6 +62,7 @@ void main() {
     for (final p in backup) {
       await rust.upsertProfile(profile: p);
     }
+    await appDataSnapshot.restore();
   });
 
   testWidgets(
@@ -64,6 +72,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
+      await appDataSnapshot.clearDesktopState();
       await tester.pumpWidget(const TindraApp());
       await _settle(
         tester,
@@ -87,6 +96,14 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+
+      await _settle(
+        tester,
+        timeout: const Duration(seconds: 5),
+        predicate: () =>
+            find.byType(ProfileConnectionChoiceRow).evaluate().isNotEmpty,
+      );
+      await tester.tap(find.byType(ProfileConnectionChoiceRow).last);
 
       // Tab count stays at 1 (the dot in the tab bar reflects the active
       // session of the active tab — still one tab).
@@ -122,22 +139,23 @@ Future<void> _settle(
 
 int _tabDots(WidgetTester tester) {
   // Tab bar dots are 6×6 Containers (state colour pills).
-  return tester.widgetList<Container>(find.byType(Container)).where((c) {
-    final box = c.constraints;
-    if (box == null) return false;
-    return box.maxWidth == 6 && box.maxHeight == 6;
-  }).length;
+  return find
+      .byWidgetPredicate(
+        (widget) => widget.key.toString().startsWith("[<'tab-close-"),
+      )
+      .evaluate()
+      .length;
 }
 
 int _splitFrames(WidgetTester tester) {
   // Each split pane wraps its _CellGrid in a bordered Container with
-  // EdgeInsets.all(2) margin. We approximate with: Containers that have
-  // a BoxDecoration with a non-null border AND a 2-px margin.
+  // EdgeInsets.all(4) margin. We approximate with: Containers that have
+  // a BoxDecoration with a non-null border AND a 4-px margin.
   return tester.widgetList<Container>(find.byType(Container)).where((c) {
     final dec = c.decoration;
     if (dec is! BoxDecoration) return false;
     if (dec.border == null) return false;
-    if (c.margin != const EdgeInsets.all(2)) return false;
+    if (c.margin != const EdgeInsets.all(4)) return false;
     return true;
   }).length;
 }

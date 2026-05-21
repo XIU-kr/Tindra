@@ -132,6 +132,7 @@ class _SessionPane extends StatelessWidget {
                   ),
                 Expanded(
                   child: Focus(
+                    key: const ValueKey('terminal-focus'),
                     focusNode: termFocus,
                     autofocus: false,
                     onKeyEvent: onTermKey,
@@ -777,12 +778,11 @@ class _DraggableTabPillState extends State<_DraggableTabPill> {
         onDoubleTap: () => widget.onRename(widget.index),
         onSecondaryTapDown: (details) =>
             _showTabMenu(context, details.globalPosition),
-        child: Container(
+        child: DecoratedBox(
           decoration: BoxDecoration(
             color: widget.active ? _bg0 : (_hover ? _bg2 : Colors.transparent),
             border: widget.active
                 ? Border(
-                    top: BorderSide(color: accent, width: 2),
                     left: BorderSide(color: _line),
                     right: BorderSide(color: _line),
                   )
@@ -792,52 +792,70 @@ class _DraggableTabPillState extends State<_DraggableTabPill> {
               topRight: Radius.circular(6),
             ),
           ),
-          padding: EdgeInsets.fromLTRB(12, widget.active ? 6 : 8, 10, 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Stack(
             children: [
-              Container(
-                width: 6,
-                height: 6,
-                constraints: const BoxConstraints.tightFor(width: 6, height: 6),
-                decoration: BoxDecoration(
-                  color: tab.hasBellActivity
-                      ? _Pal.cRose
-                      : tab.hasUnreadActivity
-                      ? _Pal.cAmber
-                      : _stateColor(tab.state, accent),
-                  shape: BoxShape.circle,
+              if (widget.active)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  child: Container(height: 2, color: accent),
                 ),
-              ),
-              if (tab.hasBellActivity) ...[
-                const SizedBox(width: 6),
-                Icon(
-                  Icons.notifications_active_outlined,
-                  size: 12,
-                  color: _Pal.cRose,
-                ),
-              ],
-              if (widget.group.pinned) ...[
-                const SizedBox(width: 6),
-                Icon(Icons.push_pin, size: 11, color: _ink3),
-              ],
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: _mono(
-                  size: 12.5,
-                  color: color,
-                  weight: widget.active ? FontWeight.w500 : FontWeight.w400,
-                ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                key: ValueKey('tab-close-${widget.index}'),
-                behavior: HitTestBehavior.opaque,
-                onTap: widget.onClose,
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: Icon(Icons.close, size: 11, color: _ink3),
+              Padding(
+                padding: EdgeInsets.fromLTRB(12, widget.active ? 6 : 8, 10, 7),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 6,
+                        height: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: tab.hasBellActivity
+                            ? _Pal.cRose
+                            : tab.hasUnreadActivity
+                            ? _Pal.cAmber
+                            : _stateColor(tab.state, accent),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    if (tab.hasBellActivity) ...[
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.notifications_active_outlined,
+                        size: 12,
+                        color: _Pal.cRose,
+                      ),
+                    ],
+                    if (widget.group.pinned) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.push_pin, size: 11, color: _ink3),
+                    ],
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: _mono(
+                        size: 12.5,
+                        color: color,
+                        weight: widget.active
+                            ? FontWeight.w500
+                            : FontWeight.w400,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      key: ValueKey('tab-close-${widget.index}'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.onClose,
+                      child: Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: Icon(Icons.close, size: 11, color: _ink3),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

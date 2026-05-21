@@ -2,7 +2,6 @@
 
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -11,6 +10,8 @@ import 'package:tindra_desktop/src/rust/api/profiles.dart' as rust;
 import 'package:tindra_desktop/src/rust/api/settings.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
+import 'test_support.dart';
+
 const _profileName = 'shortcuts-test-profile';
 const _keyPath = r'C:\Users\XIU\.ssh\id_ed25519';
 
@@ -18,11 +19,14 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   late File settingsFile;
+  late AppDataSnapshot appDataSnapshot;
   late rust.Settings backupSettings;
   late List<rust.Profile> backupProfiles;
 
   setUpAll(() async {
     await RustLib.init();
+    appDataSnapshot = await AppDataSnapshot.capture();
+    await appDataSnapshot.clearDesktopState();
     final appDataDir = File(await rust.profilesPath()).parent;
     settingsFile = File('${appDataDir.path}/settings.json');
     backupSettings = await rust.loadSettings();
@@ -47,6 +51,7 @@ void main() {
         transport: 'ssh',
       ),
     );
+    await trustLocalhostHostKey();
   });
 
   tearDownAll(() async {
@@ -58,6 +63,7 @@ void main() {
     for (final p in backupProfiles) {
       await rust.upsertProfile(profile: p);
     }
+    await appDataSnapshot.restore();
   });
 
   test(
@@ -107,6 +113,8 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
+      await appDataSnapshot.clearDesktopState();
+      await useEnglishTestSettings();
       await tester.pumpWidget(const TindraApp());
       await _settle(
         tester,
@@ -161,10 +169,10 @@ Future<void> _settle(
 }
 
 int _visibleTabCount(WidgetTester tester) {
-  final dots = tester.widgetList<Container>(find.byType(Container)).where((c) {
-    final box = c.constraints;
-    if (box == null) return false;
-    return box.maxWidth == 6 && box.maxHeight == 6;
-  });
-  return dots.length;
+  return find
+      .byWidgetPredicate(
+        (widget) => widget.key.toString().startsWith("[<'tab-close-"),
+      )
+      .evaluate()
+      .length;
 }

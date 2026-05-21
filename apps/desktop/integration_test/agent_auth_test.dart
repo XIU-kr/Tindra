@@ -17,11 +17,21 @@ import 'package:integration_test/integration_test.dart';
 import 'package:tindra_desktop/src/rust/api/ssh.dart' as rust;
 import 'package:tindra_desktop/src/rust/frb_generated.dart';
 
+import 'test_support.dart';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
+  late AppDataSnapshot appDataSnapshot;
+
   setUpAll(() async {
     await RustLib.init();
+    appDataSnapshot = await AppDataSnapshot.capture();
+    await trustLocalhostHostKey();
+  });
+
+  tearDownAll(() async {
+    await appDataSnapshot.restore();
   });
 
   test(
